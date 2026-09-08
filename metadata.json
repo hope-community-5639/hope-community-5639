@@ -1,0 +1,6 @@
+{
+  "name": "Hope Community Support",
+  "description": "Hands On Personal Empowerment - Comprehensive behavioral health, counseling, therapy, intervention, training, and mentoring platform established in 2008.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
