@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { dbStore } from '../../db/store';
-import { User, AuditLog, ServiceItem } from '../../types';
+import { User, AuditLog, ServiceItem, JobApplication, ContactInquiry, SystemSettings } from '../../types';
 import {
   Users,
   Shield,
@@ -15,17 +15,33 @@ import {
   Download,
   AlertTriangle,
   Building,
+  Briefcase,
+  Mail,
+  Sliders,
+  Eye,
+  Save,
+  Check,
 } from 'lucide-react';
 import { EmergencyBanner } from '../common/EmergencyBanner';
 import { INITIAL_SERVICES } from '../../db/initialData';
 
 export const AdminPortal: React.FC = () => {
   const { currentUser } = useAuth();
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'audit' | 'services' | 'compliance'>('overview');
+  const [activeTab, setActiveTab] = useState<
+    'overview' | 'users' | 'audit' | 'job_applications' | 'inquiries' | 'services' | 'settings' | 'compliance'
+  >('overview');
 
   const [users, setUsers] = useState<User[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [services, setServices] = useState<ServiceItem[]>(INITIAL_SERVICES);
+  const [jobApplications, setJobApplications] = useState<JobApplication[]>([]);
+  const [contactInquiries, setContactInquiries] = useState<ContactInquiry[]>([]);
+  const [settings, setSettings] = useState<SystemSettings>(dbStore.getSettings());
+  const [savedSettingsMsg, setSavedSettingsMsg] = useState(false);
+  const [selectedApp, setSelectedApp] = useState<JobApplication | null>(null);
+  const [appReviewNotes, setAppReviewNotes] = useState('');
+  const [selectedInquiry, setSelectedInquiry] = useState<ContactInquiry | null>(null);
+  const [inquiryNotes, setInquiryNotes] = useState('');
 
   // New user modal
   const [showNewUserModal, setShowNewUserModal] = useState(false);
@@ -42,6 +58,9 @@ export const AdminPortal: React.FC = () => {
     if (!currentUser) return;
     setUsers(dbStore.getUsers(currentUser));
     setAuditLogs(dbStore.getAuditLogs(currentUser));
+    setJobApplications(dbStore.getJobApplications(currentUser));
+    setContactInquiries(dbStore.getContactInquiries(currentUser));
+    setSettings(dbStore.getSettings());
   };
 
   useEffect(() => {
@@ -61,6 +80,31 @@ export const AdminPortal: React.FC = () => {
     setNewFirstName('');
     setNewLastName('');
     setNewPhone('');
+    loadData();
+  };
+
+  const handleUpdateAppStatus = (id: string, status: JobApplication['status'], notes?: string) => {
+    if (!currentUser) return;
+    dbStore.updateJobApplicationStatus(id, status, notes, currentUser);
+    setSelectedApp(null);
+    setAppReviewNotes('');
+    loadData();
+  };
+
+  const handleUpdateInquiryStatus = (id: string, status: ContactInquiry['status'], notes?: string) => {
+    if (!currentUser) return;
+    dbStore.updateContactInquiryStatus(id, status, notes, currentUser);
+    setSelectedInquiry(null);
+    setInquiryNotes('');
+    loadData();
+  };
+
+  const handleSaveSettings = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+    dbStore.updateSettings(settings, currentUser);
+    setSavedSettingsMsg(true);
+    setTimeout(() => setSavedSettingsMsg(false), 3000);
     loadData();
   };
 
@@ -129,7 +173,10 @@ export const AdminPortal: React.FC = () => {
           { id: 'overview', label: 'Practice Overview' },
           { id: 'users', label: `Staff & Users Directory (${users.length})` },
           { id: 'audit', label: `HIPAA Audit Trail (${auditLogs.length})` },
+          { id: 'job_applications', label: `Career Applications (${jobApplications.length})` },
+          { id: 'inquiries', label: `Contact Inquiries (${contactInquiries.length})` },
           { id: 'services', label: `Clinical Modalities (${services.length})` },
+          { id: 'settings', label: 'Clinic Settings' },
           { id: 'compliance', label: 'HIPAA & System Security' },
         ].map((tab) => (
           <button
@@ -390,7 +437,315 @@ export const AdminPortal: React.FC = () => {
         </div>
       )}
 
-      {/* Tab 5: COMPLIANCE & SECURITY */}
+      {/* Tab: JOB APPLICATIONS */}
+      {activeTab === 'job_applications' && (
+        <div className="bg-white rounded-2xl border border-[#A9C2B2]/40 p-6 sm:p-8 shadow-xs space-y-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="font-serif font-bold text-xl text-[#173F3A]">
+                Career Candidate Applications ({jobApplications.length})
+              </h3>
+              <p className="text-xs text-[#66736F]">
+                Submissions from licensed professionals, clinical interns, and behavioral support specialists.
+              </p>
+            </div>
+          </div>
+
+          {jobApplications.length === 0 ? (
+            <div className="text-center py-12 bg-[#F8F5EE]/50 rounded-xl border border-dashed border-[#A9C2B2]/60">
+              <Briefcase className="w-10 h-10 mx-auto text-[#A9C2B2] mb-3" />
+              <h3 className="font-serif font-bold text-[#173F3A] text-sm">No applications submitted yet</h3>
+              <p className="text-xs text-[#66736F] max-w-sm mx-auto mt-1">
+                Candidate submissions from the public Careers page will be listed here with license verification details.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto border border-[#A9C2B2]/30 rounded-xl">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-[#F8F5EE] text-[#173F3A] border-b border-[#A9C2B2]/40">
+                  <tr>
+                    <th className="p-3 font-semibold">Applicant</th>
+                    <th className="p-3 font-semibold">Position</th>
+                    <th className="p-3 font-semibold">License & Credentials</th>
+                    <th className="p-3 font-semibold">Experience / Degree</th>
+                    <th className="p-3 font-semibold">Date Applied</th>
+                    <th className="p-3 font-semibold">Status</th>
+                    <th className="p-3 font-semibold text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#A9C2B2]/20">
+                  {jobApplications.map((app) => (
+                    <tr key={app.id} className="hover:bg-[#F8F5EE]/40 transition-colors">
+                      <td className="p-3 font-medium text-[#173F3A]">
+                        <div>{app.applicantName}</div>
+                        <div className="text-[11px] text-[#66736F]">{app.applicantEmail} • {app.applicantPhone}</div>
+                      </td>
+                      <td className="p-3 font-medium text-[#202826]">{app.jobTitle}</td>
+                      <td className="p-3 text-[#202826]">{app.licenseNumber || 'Under supervision'}</td>
+                      <td className="p-3 text-[#66736F]">
+                        <div>{app.resumeFileName ? `Resume: ${app.resumeFileName}` : 'Resume attached'}</div>
+                      </td>
+                      <td className="p-3 text-[#66736F] whitespace-nowrap">
+                        {new Date(app.createdAt).toLocaleDateString()}
+                      </td>
+                      <td className="p-3">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                            app.status === 'offer'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : app.status === 'interview_scheduled'
+                              ? 'bg-sky-100 text-sky-800'
+                              : app.status === 'under_review'
+                              ? 'bg-amber-100 text-amber-800'
+                              : app.status === 'archived'
+                              ? 'bg-stone-100 text-stone-600'
+                              : 'bg-[#216761]/10 text-[#216761]'
+                          }`}
+                        >
+                          {app.status.replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td className="p-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedApp(app);
+                            setAppReviewNotes(app.reviewerNotes || '');
+                          }}
+                          className="px-3 py-1 bg-[#216761] text-white text-xs font-semibold rounded hover:bg-[#173F3A]"
+                        >
+                          Review Candidate
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab: CONTACT INQUIRIES */}
+      {activeTab === 'inquiries' && (
+        <div className="bg-white rounded-2xl border border-[#A9C2B2]/40 p-6 sm:p-8 shadow-xs space-y-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="font-serif font-bold text-xl text-[#173F3A]">
+                General & Community Contact Inquiries ({contactInquiries.length})
+              </h3>
+              <p className="text-xs text-[#66736F]">
+                Messages submitted via the public Contact page by individuals, parents, and community partners.
+              </p>
+            </div>
+          </div>
+
+          {contactInquiries.length === 0 ? (
+            <div className="text-center py-12 bg-[#F8F5EE]/50 rounded-xl border border-dashed border-[#A9C2B2]/60">
+              <Mail className="w-10 h-10 mx-auto text-[#A9C2B2] mb-3" />
+              <h3 className="font-serif font-bold text-[#173F3A] text-sm">No new inquiries</h3>
+              <p className="text-xs text-[#66736F] max-w-sm mx-auto mt-1">
+                Messages from the Contact Us form will appear here with contact preferences and triage notes.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto border border-[#A9C2B2]/30 rounded-xl">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-[#F8F5EE] text-[#173F3A] border-b border-[#A9C2B2]/40">
+                  <tr>
+                    <th className="p-3 font-semibold">Name</th>
+                    <th className="p-3 font-semibold">Contact Info</th>
+                    <th className="p-3 font-semibold">Subject / Area</th>
+                    <th className="p-3 font-semibold">Preferred Contact</th>
+                    <th className="p-3 font-semibold">Date Received</th>
+                    <th className="p-3 font-semibold">Status</th>
+                    <th className="p-3 font-semibold text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#A9C2B2]/20">
+                  {contactInquiries.map((inq) => (
+                    <tr key={inq.id} className="hover:bg-[#F8F5EE]/40 transition-colors">
+                      <td className="p-3 font-medium text-[#173F3A]">{inq.name}</td>
+                      <td className="p-3 text-[#202826]">
+                        <div>{inq.email}</div>
+                        <div className="text-[11px] text-[#66736F]">{inq.phone || 'No phone'}</div>
+                      </td>
+                      <td className="p-3 text-[#202826] font-medium">{inq.subject}</td>
+                      <td className="p-3 text-[#66736F] capitalize">{inq.preferredContactMethod}</td>
+                      <td className="p-3 text-[#66736F] whitespace-nowrap">
+                        {new Date(inq.createdAt).toLocaleDateString()}
+                      </td>
+                      <td className="p-3">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                            inq.status === 'resolved'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : inq.status === 'contacted'
+                              ? 'bg-sky-100 text-sky-800'
+                              : inq.status === 'reviewing'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-[#216761]/10 text-[#216761]'
+                          }`}
+                        >
+                          {inq.status}
+                        </span>
+                      </td>
+                      <td className="p-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedInquiry(inq);
+                            setInquiryNotes(inq.responseNotes || '');
+                          }}
+                          className="px-3 py-1 bg-[#216761] text-white text-xs font-semibold rounded hover:bg-[#173F3A]"
+                        >
+                          View & Reply
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab: CLINIC SETTINGS */}
+      {activeTab === 'settings' && (
+        <div className="bg-white rounded-2xl border border-[#A9C2B2]/40 p-6 sm:p-8 shadow-xs space-y-6">
+          <div className="flex items-center justify-between border-b border-[#F1ECE1] pb-4">
+            <div>
+              <h3 className="font-serif font-bold text-xl text-[#173F3A]">
+                Clinic Operations & Organization Settings
+              </h3>
+              <p className="text-xs text-[#66736F]">
+                Configure practice metadata, communication numbers, emergency protocols, and site status.
+              </p>
+            </div>
+            {savedSettingsMsg && (
+              <span className="px-3 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-md flex items-center gap-1">
+                <Check className="w-3.5 h-3.5" /> Settings Saved!
+              </span>
+            )}
+          </div>
+
+          <form onSubmit={handleSaveSettings} className="space-y-6 text-xs">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-semibold text-[#173F3A] mb-1">Clinic Operating Name</label>
+                <input
+                  type="text"
+                  value={settings.organizationName}
+                  onChange={(e) => setSettings({ ...settings, organizationName: e.target.value })}
+                  className="w-full px-3 py-2 bg-[#F8F5EE] rounded-lg border border-[#A9C2B2]/60 focus:outline-none focus:ring-2 focus:ring-[#216761]"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-[#173F3A] mb-1">Legal Corporate Entity</label>
+                <input
+                  type="text"
+                  value={settings.legalName}
+                  onChange={(e) => setSettings({ ...settings, legalName: e.target.value })}
+                  className="w-full px-3 py-2 bg-[#F8F5EE] rounded-lg border border-[#A9C2B2]/60 focus:outline-none focus:ring-2 focus:ring-[#216761]"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block font-semibold text-[#173F3A] mb-1">Primary Voice Phone</label>
+                <input
+                  type="text"
+                  value={settings.phone}
+                  onChange={(e) => setSettings({ ...settings, phone: e.target.value })}
+                  className="w-full px-3 py-2 bg-[#F8F5EE] rounded-lg border border-[#A9C2B2]/60 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-[#173F3A] mb-1">Secure HIPAA Fax</label>
+                <input
+                  type="text"
+                  value={settings.fax}
+                  onChange={(e) => setSettings({ ...settings, fax: e.target.value })}
+                  className="w-full px-3 py-2 bg-[#F8F5EE] rounded-lg border border-[#A9C2B2]/60 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-[#173F3A] mb-1">Central Intake Email</label>
+                <input
+                  type="email"
+                  value={settings.email}
+                  onChange={(e) => setSettings({ ...settings, email: e.target.value })}
+                  className="w-full px-3 py-2 bg-[#F8F5EE] rounded-lg border border-[#A9C2B2]/60 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-[#173F3A] mb-1">Physical Office Address</label>
+              <input
+                type="text"
+                value={settings.address}
+                onChange={(e) => setSettings({ ...settings, address: e.target.value })}
+                className="w-full px-3 py-2 bg-[#F8F5EE] rounded-lg border border-[#A9C2B2]/60 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-[#173F3A] mb-1">Office Hours Description</label>
+              <input
+                type="text"
+                value={settings.officeHours}
+                onChange={(e) => setSettings({ ...settings, officeHours: e.target.value })}
+                className="w-full px-3 py-2 bg-[#F8F5EE] rounded-lg border border-[#A9C2B2]/60 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-[#173F3A] mb-1">Crisis & Emergency Notice Text</label>
+              <textarea
+                rows={2}
+                value={settings.emergencyNotice}
+                onChange={(e) => setSettings({ ...settings, emergencyNotice: e.target.value })}
+                className="w-full px-3 py-2 bg-[#F8F5EE] rounded-lg border border-[#A9C2B2]/60 focus:outline-none"
+              />
+            </div>
+
+            <div className="p-4 bg-[#F8F5EE] rounded-xl border border-[#A9C2B2]/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <span className="font-semibold text-[#173F3A] block">Site Maintenance Mode</span>
+                <span className="text-[11px] text-[#66736F]">
+                  When active, non-staff visitors receive a maintenance notification.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSettings({ ...settings, maintenanceMode: !settings.maintenanceMode })}
+                className={`px-4 py-2 rounded-lg font-bold text-xs transition-colors ${
+                  settings.maintenanceMode
+                    ? 'bg-rose-700 text-white'
+                    : 'bg-stone-200 text-stone-800'
+                }`}
+              >
+                {settings.maintenanceMode ? 'Maintenance Enabled' : 'Normal Operation'}
+              </button>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="submit"
+                className="px-6 py-2.5 rounded-lg bg-[#216761] text-white font-bold hover:bg-[#173F3A] flex items-center gap-2 shadow-xs"
+              >
+                <Save className="w-4 h-4 text-[#C6A66B]" />
+                Save System Settings
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Tab: COMPLIANCE & PRODUCTION READINESS */}
       {activeTab === 'compliance' && (
         <div className="bg-white rounded-2xl border border-[#A9C2B2]/40 p-6 sm:p-8 shadow-xs space-y-6">
           <div className="border-b border-[#F1ECE1] pb-4">
@@ -522,6 +877,164 @@ export const AdminPortal: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Review Career Application Modal */}
+      {selectedApp && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#173F3A]/60 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white rounded-xl max-w-2xl w-full p-6 space-y-4 my-8 max-h-[85vh] overflow-y-auto">
+            <h3 className="font-serif font-bold text-lg text-[#173F3A] border-b border-[#F1ECE1] pb-2">
+              Candidate Application: {selectedApp.applicantName}
+            </h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs bg-[#F8F5EE] p-4 rounded-lg">
+              <div>
+                <p><strong>Position:</strong> {selectedApp.jobTitle}</p>
+                <p><strong>Email:</strong> {selectedApp.applicantEmail}</p>
+                <p><strong>Phone:</strong> {selectedApp.applicantPhone}</p>
+              </div>
+              <div>
+                <p><strong>License Number:</strong> {selectedApp.licenseNumber || 'Under clinical supervision'}</p>
+                <p><strong>Resume File:</strong> {selectedApp.resumeFileName || 'On file'}</p>
+                <p><strong>Applied:</strong> {new Date(selectedApp.createdAt).toLocaleDateString()}</p>
+              </div>
+            </div>
+
+            {selectedApp.coverNote && (
+              <div className="text-xs space-y-1">
+                <p className="font-semibold text-[#173F3A]">Cover Note & Statement of Practice:</p>
+                <div className="bg-[#F8F5EE] p-3 rounded text-[#202826] border border-[#A9C2B2]/30 leading-relaxed whitespace-pre-wrap">
+                  {selectedApp.coverNote}
+                </div>
+              </div>
+            )}
+
+            {selectedApp.resumeFileName && (
+              <div className="text-xs text-[#216761] flex items-center gap-1.5 p-2 bg-[#216761]/5 rounded border border-[#216761]/20">
+                <FileText className="w-4 h-4" />
+                <span>Uploaded Resume: <strong>{selectedApp.resumeFileName}</strong></span>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-semibold text-[#173F3A] mb-1">
+                Executive & Clinical Hiring Notes
+              </label>
+              <textarea
+                rows={3}
+                value={appReviewNotes}
+                onChange={(e) => setAppReviewNotes(e.target.value)}
+                placeholder="Document interview dates, credential checks, or committee notes..."
+                className="w-full px-3 py-2 text-xs bg-[#F8F5EE] rounded-lg border border-[#A9C2B2]/60 focus:outline-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-3 border-t border-[#F1ECE1]">
+              <button
+                type="button"
+                onClick={() => setSelectedApp(null)}
+                className="text-xs text-[#66736F]"
+              >
+                Close
+              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleUpdateAppStatus(selectedApp.id, 'under_review', appReviewNotes)}
+                  className="px-3 py-1.5 rounded-lg border border-amber-300 text-amber-800 bg-amber-50 text-xs font-semibold hover:bg-amber-100"
+                >
+                  Mark Reviewing
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateAppStatus(selectedApp.id, 'interview_scheduled', appReviewNotes)}
+                  className="px-3 py-1.5 rounded-lg border border-sky-300 text-sky-800 bg-sky-50 text-xs font-semibold hover:bg-sky-100"
+                >
+                  Schedule Interview
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateAppStatus(selectedApp.id, 'archived', appReviewNotes)}
+                  className="px-3 py-1.5 rounded-lg border border-stone-300 text-stone-700 bg-stone-50 text-xs font-semibold hover:bg-stone-100"
+                >
+                  Archive / Decline
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateAppStatus(selectedApp.id, 'offer', appReviewNotes)}
+                  className="px-4 py-1.5 rounded-lg bg-[#216761] text-white text-xs font-bold hover:bg-[#173F3A]"
+                >
+                  Extend Offer
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Review Contact Inquiry Modal */}
+      {selectedInquiry && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#173F3A]/60 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white rounded-xl max-w-xl w-full p-6 space-y-4 my-8 max-h-[85vh] overflow-y-auto">
+            <h3 className="font-serif font-bold text-lg text-[#173F3A] border-b border-[#F1ECE1] pb-2">
+              Contact Inquiry: {selectedInquiry.name}
+            </h3>
+
+            <div className="text-xs bg-[#F8F5EE] p-3 rounded-lg space-y-1">
+              <p><strong>Email:</strong> {selectedInquiry.email}</p>
+              <p><strong>Phone:</strong> {selectedInquiry.phone || 'Not provided'}</p>
+              <p><strong>Subject:</strong> {selectedInquiry.subject}</p>
+              <p><strong>Preferred Contact Method:</strong> <span className="capitalize">{selectedInquiry.preferredContactMethod}</span></p>
+              <p><strong>Received:</strong> {new Date(selectedInquiry.createdAt).toLocaleString()}</p>
+            </div>
+
+            <div className="text-xs space-y-1">
+              <p className="font-semibold text-[#173F3A]">Message Content:</p>
+              <div className="bg-[#F8F5EE] p-3 rounded text-[#202826] border border-[#A9C2B2]/30 leading-relaxed whitespace-pre-wrap">
+                {selectedInquiry.message}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-[#173F3A] mb-1">
+                Internal Response & Follow-up Notes
+              </label>
+              <textarea
+                rows={3}
+                value={inquiryNotes}
+                onChange={(e) => setInquiryNotes(e.target.value)}
+                placeholder="Document follow-up calls, clinical routing, or resolution notes..."
+                className="w-full px-3 py-2 text-xs bg-[#F8F5EE] rounded-lg border border-[#A9C2B2]/60 focus:outline-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-3 border-t border-[#F1ECE1]">
+              <button
+                type="button"
+                onClick={() => setSelectedInquiry(null)}
+                className="text-xs text-[#66736F]"
+              >
+                Close
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleUpdateInquiryStatus(selectedInquiry.id, 'contacted', inquiryNotes)}
+                  className="px-3 py-1.5 rounded-lg border border-sky-300 text-sky-800 bg-sky-50 text-xs font-semibold hover:bg-sky-100"
+                >
+                  Mark Contacted
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateInquiryStatus(selectedInquiry.id, 'resolved', inquiryNotes)}
+                  className="px-4 py-1.5 rounded-lg bg-[#216761] text-white text-xs font-bold hover:bg-[#173F3A]"
+                >
+                  Mark Resolved
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -25,13 +25,23 @@ export const ReferralPartnerPage: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    dbStore.logAction(
-      null,
-      'EXTERNAL_PARTNER_REFERRAL',
-      'referrals',
-      `ref_${Date.now()}`,
-      `Referral from ${form.referringOrganization} (${form.referrerName}) for client ${form.clientFirstName} ${form.clientLastName} (${form.requestedService})`
-    );
+    dbStore.submitReferral({
+      referringOrganization: form.referringOrganization,
+      referrerName: form.referrerName,
+      referrerTitle: form.referrerTitle,
+      referrerPhone: form.referrerPhone,
+      referrerEmail: form.referrerEmail,
+      clientFirstName: form.clientFirstName,
+      clientLastName: form.clientLastName,
+      clientDOB: form.clientDOB,
+      clientPhone: form.clientPhone,
+      clientEmail: form.clientEmail,
+      insuranceType: form.insuranceType,
+      requestedService: form.requestedService,
+      deliveryPreference: form.deliveryPreference as any,
+      urgencyLevel: form.urgencyLevel as any,
+      clinicalReason: form.clinicalReason,
+    });
     setSubmitted(true);
   };
 

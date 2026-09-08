@@ -16,14 +16,14 @@ export const ContactPage: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Log contact inquiry into audit / security log
-    dbStore.logAction(
-      null,
-      'PUBLIC_CONTACT_INQUIRY',
-      'contact_messages',
-      `inquiry_${Date.now()}`,
-      `Inquiry from ${form.name} (${form.email}) regarding ${form.subject}`
-    );
+    dbStore.submitContactInquiry({
+      name: form.name,
+      email: form.email,
+      phone: form.phone,
+      subject: form.subject,
+      preferredContact: form.preferredContact as 'phone' | 'email',
+      message: form.message,
+    });
     setSubmitted(true);
   };
 

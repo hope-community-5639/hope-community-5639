@@ -14,6 +14,12 @@ import {
   NotificationItem,
   CMSContent,
   DeliveryMethod,
+  ReferralItem,
+  JobOpening,
+  JobApplication,
+  ContactInquiry,
+  WaitlistEntry,
+  SystemSettings,
 } from '../types';
 import {
   INITIAL_USERS,
@@ -28,6 +34,12 @@ import {
   INITIAL_SECURITY_INCIDENTS,
   INITIAL_NOTIFICATIONS,
   INITIAL_CMS,
+  INITIAL_REFERRALS,
+  INITIAL_JOB_OPENINGS,
+  INITIAL_JOB_APPLICATIONS,
+  INITIAL_CONTACT_INQUIRIES,
+  INITIAL_WAITLIST,
+  INITIAL_SETTINGS,
 } from './initialData';
 
 const STORAGE_KEYS = {
@@ -43,6 +55,12 @@ const STORAGE_KEYS = {
   INCIDENTS: 'hcs_incidents_v1',
   NOTIFICATIONS: 'hcs_notifications_v1',
   CMS: 'hcs_cms_v1',
+  REFERRALS: 'hcs_referrals_v1',
+  JOB_OPENINGS: 'hcs_job_openings_v1',
+  JOB_APPLICATIONS: 'hcs_job_applications_v1',
+  CONTACT_INQUIRIES: 'hcs_contact_inquiries_v1',
+  WAITLIST: 'hcs_waitlist_v1',
+  SETTINGS: 'hcs_settings_v1',
 };
 
 function getStored<T>(key: string, fallback: T): T {
@@ -80,6 +98,12 @@ export class DatabaseStore {
   private incidents: SecurityIncident[] = getStored(STORAGE_KEYS.INCIDENTS, INITIAL_SECURITY_INCIDENTS);
   private notifications: NotificationItem[] = getStored(STORAGE_KEYS.NOTIFICATIONS, INITIAL_NOTIFICATIONS);
   private cms: CMSContent = getStored(STORAGE_KEYS.CMS, INITIAL_CMS);
+  private referrals: ReferralItem[] = getStored(STORAGE_KEYS.REFERRALS, INITIAL_REFERRALS);
+  private jobOpenings: JobOpening[] = getStored(STORAGE_KEYS.JOB_OPENINGS, INITIAL_JOB_OPENINGS);
+  private jobApplications: JobApplication[] = getStored(STORAGE_KEYS.JOB_APPLICATIONS, INITIAL_JOB_APPLICATIONS);
+  private contactInquiries: ContactInquiry[] = getStored(STORAGE_KEYS.CONTACT_INQUIRIES, INITIAL_CONTACT_INQUIRIES);
+  private waitlist: WaitlistEntry[] = getStored(STORAGE_KEYS.WAITLIST, INITIAL_WAITLIST);
+  private settings: SystemSettings = getStored(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS);
 
   private constructor() {}
 
@@ -657,6 +681,199 @@ export class DatabaseStore {
     this.notify();
   }
 
+  // --- Referrals ---
+  public getReferrals(requestingUser: User): ReferralItem[] {
+    if (!['intake_coordinator', 'supervisor', 'administrator', 'super_admin', 'provider'].includes(requestingUser.role)) {
+      throw new Error('Permission denied: Only clinical and intake staff may access partner referrals.');
+    }
+    return [...this.referrals];
+  }
+
+  public submitReferral(data: Omit<ReferralItem, 'id' | 'createdAt' | 'updatedAt' | 'status'>, submittingUser?: User | null): ReferralItem {
+    const newRef: ReferralItem = {
+      ...data,
+      id: `ref_${Date.now()}`,
+      status: 'received',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    this.referrals = [newRef, ...this.referrals];
+    setStored(STORAGE_KEYS.REFERRALS, this.referrals);
+    this.logAction(submittingUser || null, 'REFERRAL_SUBMITTED', 'referrals', newRef.id, `Referral from ${newRef.referringOrganization} for ${newRef.clientFirstName} ${newRef.clientLastName}`);
+    this.notify();
+    return newRef;
+  }
+
+  public updateReferralStatus(refId: string, status: ReferralItem['status'], notes: string, staffUser: User): void {
+    if (!['intake_coordinator', 'supervisor', 'administrator', 'super_admin'].includes(staffUser.role)) {
+      throw new Error('Permission denied: Elevated role required to update referral status.');
+    }
+    this.referrals = this.referrals.map((r) =>
+      r.id === refId
+        ? {
+            ...r,
+            status,
+            internalNotes: notes,
+            assignedStaffId: staffUser.id,
+            assignedStaffName: `${staffUser.firstName} ${staffUser.lastName}`,
+            updatedAt: new Date().toISOString(),
+          }
+        : r
+    );
+    setStored(STORAGE_KEYS.REFERRALS, this.referrals);
+    this.logAction(staffUser, 'REFERRAL_STATUS_UPDATED', 'referrals', refId, `Updated referral status to ${status}`);
+    this.notify();
+  }
+
+  // --- Careers & Applications ---
+  public getJobOpenings(): JobOpening[] {
+    return [...this.jobOpenings];
+  }
+
+  public getJobOpeningBySlug(slug: string): JobOpening | undefined {
+    return this.jobOpenings.find((j) => j.slug === slug || j.id === slug);
+  }
+
+  public saveJobOpening(job: JobOpening, adminUser: User): void {
+    if (!['administrator', 'super_admin'].includes(adminUser.role)) {
+      throw new Error('Permission denied: Administrator role required to manage job listings.');
+    }
+    const exists = this.jobOpenings.some((j) => j.id === job.id);
+    if (exists) {
+      this.jobOpenings = this.jobOpenings.map((j) => (j.id === job.id ? job : j));
+    } else {
+      this.jobOpenings = [...this.jobOpenings, job];
+    }
+    setStored(STORAGE_KEYS.JOB_OPENINGS, this.jobOpenings);
+    this.logAction(adminUser, 'JOB_OPENING_SAVED', 'job_openings', job.id, `Saved job opening: ${job.title}`);
+    this.notify();
+  }
+
+  public deleteJobOpening(jobId: string, adminUser: User): void {
+    if (!['administrator', 'super_admin'].includes(adminUser.role)) {
+      throw new Error('Permission denied: Administrator role required.');
+    }
+    this.jobOpenings = this.jobOpenings.filter((j) => j.id !== jobId);
+    setStored(STORAGE_KEYS.JOB_OPENINGS, this.jobOpenings);
+    this.logAction(adminUser, 'JOB_OPENING_DELETED', 'job_openings', jobId, 'Deleted job opening');
+    this.notify();
+  }
+
+  public getJobApplications(adminUser: User): JobApplication[] {
+    if (!['administrator', 'super_admin', 'intake_coordinator'].includes(adminUser.role)) {
+      throw new Error('Permission denied: Administrator role required to view candidate applications.');
+    }
+    return [...this.jobApplications];
+  }
+
+  public submitJobApplication(data: Omit<JobApplication, 'id' | 'createdAt' | 'status'>): JobApplication {
+    const newApp: JobApplication = {
+      ...data,
+      id: `app_${Date.now()}`,
+      status: 'submitted',
+      createdAt: new Date().toISOString(),
+    };
+    this.jobApplications = [newApp, ...this.jobApplications];
+    setStored(STORAGE_KEYS.JOB_APPLICATIONS, this.jobApplications);
+    this.logAction(null, 'JOB_APPLICATION_SUBMITTED', 'job_applications', newApp.id, `Application submitted by ${newApp.applicantName} for ${newApp.jobTitle}`);
+    this.notify();
+    return newApp;
+  }
+
+  public updateJobApplicationStatus(appId: string, status: JobApplication['status'], reviewerNotes: string, adminUser: User): void {
+    if (!['administrator', 'super_admin'].includes(adminUser.role)) {
+      throw new Error('Permission denied: Administrator role required.');
+    }
+    this.jobApplications = this.jobApplications.map((a) =>
+      a.id === appId ? { ...a, status, reviewerNotes } : a
+    );
+    setStored(STORAGE_KEYS.JOB_APPLICATIONS, this.jobApplications);
+    this.logAction(adminUser, 'JOB_APPLICATION_STATUS_UPDATED', 'job_applications', appId, `Status updated to ${status}`);
+    this.notify();
+  }
+
+  // --- Contact Inquiries ---
+  public getContactInquiries(staffUser: User): ContactInquiry[] {
+    if (!['intake_coordinator', 'supervisor', 'administrator', 'super_admin'].includes(staffUser.role)) {
+      throw new Error('Permission denied: Authorized staff only.');
+    }
+    return [...this.contactInquiries];
+  }
+
+  public submitContactInquiry(data: Omit<ContactInquiry, 'id' | 'createdAt' | 'status'>): ContactInquiry {
+    const newInq: ContactInquiry = {
+      ...data,
+      id: `inq_${Date.now()}`,
+      status: 'new',
+      createdAt: new Date().toISOString(),
+    };
+    this.contactInquiries = [newInq, ...this.contactInquiries];
+    setStored(STORAGE_KEYS.CONTACT_INQUIRIES, this.contactInquiries);
+    this.logAction(null, 'CONTACT_INQUIRY_SUBMITTED', 'contact_inquiries', newInq.id, `Inquiry from ${newInq.name} (${newInq.email})`);
+    this.notify();
+    return newInq;
+  }
+
+  public updateContactInquiryStatus(inqId: string, status: ContactInquiry['status'], staffNotes: string, staffUser: User): void {
+    if (!['intake_coordinator', 'supervisor', 'administrator', 'super_admin'].includes(staffUser.role)) {
+      throw new Error('Permission denied: Authorized staff only.');
+    }
+    this.contactInquiries = this.contactInquiries.map((i) =>
+      i.id === inqId ? { ...i, status, staffNotes } : i
+    );
+    setStored(STORAGE_KEYS.CONTACT_INQUIRIES, this.contactInquiries);
+    this.logAction(staffUser, 'CONTACT_INQUIRY_UPDATED', 'contact_inquiries', inqId, `Status updated to ${status}`);
+    this.notify();
+  }
+
+  // --- Waitlist ---
+  public getWaitlist(user: User): WaitlistEntry[] {
+    if (user.role === 'client' || user.role === 'parent_guardian') {
+      return this.waitlist.filter((w) => w.clientId === user.id);
+    }
+    return [...this.waitlist];
+  }
+
+  public joinWaitlist(data: Omit<WaitlistEntry, 'id' | 'createdAt' | 'status'>, requestingUser: User): WaitlistEntry {
+    const newWl: WaitlistEntry = {
+      ...data,
+      id: `wl_${Date.now()}`,
+      status: 'waiting',
+      createdAt: new Date().toISOString(),
+    };
+    this.waitlist = [newWl, ...this.waitlist];
+    setStored(STORAGE_KEYS.WAITLIST, this.waitlist);
+    this.logAction(requestingUser, 'WAITLIST_JOINED', 'waitlist', newWl.id, `Joined waitlist for ${newWl.serviceName}`);
+    this.notify();
+    return newWl;
+  }
+
+  public updateWaitlistStatus(wlId: string, status: WaitlistEntry['status'], staffUser: User): void {
+    if (!['intake_coordinator', 'scheduler', 'supervisor', 'administrator', 'super_admin'].includes(staffUser.role)) {
+      throw new Error('Permission denied: Authorized staff only.');
+    }
+    this.waitlist = this.waitlist.map((w) => (w.id === wlId ? { ...w, status } : w));
+    setStored(STORAGE_KEYS.WAITLIST, this.waitlist);
+    this.logAction(staffUser, 'WAITLIST_STATUS_UPDATED', 'waitlist', wlId, `Status changed to ${status}`);
+    this.notify();
+  }
+
+  // --- System Settings ---
+  public getSettings(): SystemSettings {
+    return { ...this.settings };
+  }
+
+  public updateSettings(newSettings: Partial<SystemSettings>, adminUser: User): SystemSettings {
+    if (!['administrator', 'super_admin'].includes(adminUser.role)) {
+      throw new Error('Permission denied: Administrator role required.');
+    }
+    this.settings = { ...this.settings, ...newSettings };
+    setStored(STORAGE_KEYS.SETTINGS, this.settings);
+    this.logAction(adminUser, 'SYSTEM_SETTINGS_UPDATED', 'system_settings', 'global', 'Updated organization settings');
+    this.notify();
+    return this.settings;
+  }
+
   // Reset to initial demo data
   public resetToFactoryDemo(): void {
     localStorage.clear();
@@ -672,6 +889,12 @@ export class DatabaseStore {
     this.incidents = INITIAL_SECURITY_INCIDENTS;
     this.notifications = INITIAL_NOTIFICATIONS;
     this.cms = INITIAL_CMS;
+    this.referrals = INITIAL_REFERRALS;
+    this.jobOpenings = INITIAL_JOB_OPENINGS;
+    this.jobApplications = INITIAL_JOB_APPLICATIONS;
+    this.contactInquiries = INITIAL_CONTACT_INQUIRIES;
+    this.waitlist = INITIAL_WAITLIST;
+    this.settings = INITIAL_SETTINGS;
     this.notify();
   }
 }

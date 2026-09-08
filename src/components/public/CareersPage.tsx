@@ -1,41 +1,33 @@
 import React, { useState } from 'react';
-import { Briefcase, CheckCircle2, Heart, Award, Send } from 'lucide-react';
+import { Briefcase, CheckCircle2, Heart, Award, Send, MapPin, Clock } from 'lucide-react';
 import { EmergencyBanner } from '../common/EmergencyBanner';
+import { dbStore } from '../../db/store';
 
 export const CareersPage: React.FC = () => {
   const [submitted, setSubmitted] = useState(false);
+  const openings = dbStore.getJobOpenings();
+
   const [form, setForm] = useState({
     fullName: '',
     email: '',
     phone: '',
-    position: 'Licensed Professional Counselor (LPC/LMFT)',
+    jobId: openings[0]?.id || 'job_1',
+    position: openings[0]?.title || 'Licensed Professional Counselor (LPC/LMFT)',
     licenseNumber: '',
     coverNote: '',
   });
 
-  const positions = [
-    {
-      title: 'Licensed Professional Counselor (LPC / LMFT / LISW-CP)',
-      type: 'Full-Time & Part-Time Opportunities',
-      location: 'Rock Hill Clinic, SC & Telehealth',
-      description: 'Deliver individual, couple, and family therapy to diverse client populations. Competitive compensation, CEU stipends, flexible schedule, and clinical supervision provided.',
-    },
-    {
-      title: 'Behavioral Intervention Specialist (QMHP)',
-      type: 'Full-Time',
-      location: 'York & Chester Counties (In-Home & Community)',
-      description: 'Provide hands-on behavioral mentoring, social skill development, and crisis de-escalation for adolescents and families in residential and school-supported settings.',
-    },
-    {
-      title: 'Bilingual Intake & Client Coordinator',
-      type: 'Full-Time',
-      location: 'Rock Hill Office',
-      description: 'Greet clients, manage phone triage, verify Medicaid and commercial insurance eligibility, schedule assessments, and facilitate welcoming client intake.',
-    },
-  ];
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    dbStore.submitJobApplication({
+      jobId: form.jobId,
+      jobTitle: form.position,
+      applicantName: form.fullName,
+      applicantEmail: form.email,
+      applicantPhone: form.phone,
+      licenseNumber: form.licenseNumber,
+      coverNote: form.coverNote,
+    });
     setSubmitted(true);
   };
 
@@ -63,9 +55,9 @@ export const CareersPage: React.FC = () => {
         </h2>
 
         <div className="grid grid-cols-1 gap-6">
-          {positions.map((pos, idx) => (
+          {openings.map((pos) => (
             <div
-              key={idx}
+              key={pos.id}
               className="bg-white rounded-xl border border-[#A9C2B2]/40 p-6 shadow-xs hover:border-[#216761]/60 transition-all"
             >
               <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
@@ -77,14 +69,14 @@ export const CareersPage: React.FC = () => {
                 </span>
               </div>
               <span className="text-xs text-[#C6A66B] font-medium block mb-3">
-                {pos.location}
+                {pos.location} • {pos.department}
               </span>
               <p className="text-xs text-[#66736F] leading-relaxed mb-4">
                 {pos.description}
               </p>
               <button
                 onClick={() => {
-                  setForm({ ...form, position: pos.title });
+                  setForm({ ...form, jobId: pos.id, position: pos.title });
                   document.getElementById('career-apply-form')?.scrollIntoView({ behavior: 'smooth' });
                 }}
                 className="text-xs font-bold text-[#216761] hover:underline"

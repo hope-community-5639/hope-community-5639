@@ -277,3 +277,102 @@ export interface CMSContent {
   officeAddress: string;
   lastUpdated: string;
 }
+
+export interface ContactInquiry {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  subject: string;
+  preferredContact: 'phone' | 'email';
+  message: string;
+  status: 'new' | 'contacted' | 'resolved' | 'converted_to_intake';
+  staffNotes?: string;
+  createdAt: string;
+}
+
+export interface ReferralItem {
+  id: string;
+  referringOrganization: string;
+  referrerName: string;
+  referrerTitle?: string;
+  referrerPhone: string;
+  referrerEmail: string;
+  clientFirstName: string;
+  clientLastName: string;
+  clientDOB: string;
+  clientPhone: string;
+  clientEmail?: string;
+  insuranceType: string;
+  requestedService: string;
+  deliveryPreference: DeliveryMethod;
+  urgencyLevel: 'standard' | 'urgent_non_emergency' | 'flexible';
+  clinicalReason: string;
+  status: 'received' | 'benefits_verification' | 'outreach_scheduled' | 'accepted' | 'declined';
+  assignedStaffId?: string;
+  assignedStaffName?: string;
+  internalNotes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface JobOpening {
+  id: string;
+  slug: string;
+  title: string;
+  type: string;
+  location: string;
+  department: string;
+  description: string;
+  responsibilities: string[];
+  qualifications: string[];
+  benefits: string[];
+  isActive: boolean;
+}
+
+export interface JobApplication {
+  id: string;
+  jobId: string;
+  jobTitle: string;
+  applicantName: string;
+  applicantEmail: string;
+  applicantPhone: string;
+  licenseNumber?: string;
+  coverNote: string;
+  resumeFileName?: string;
+  resumeFileSize?: string;
+  status: 'submitted' | 'under_review' | 'interview_scheduled' | 'offer' | 'archived';
+  reviewerNotes?: string;
+  createdAt: string;
+}
+
+export interface WaitlistEntry {
+  id: string;
+  clientId: string;
+  clientName: string;
+  clientEmail: string;
+  clientPhone: string;
+  serviceName: string;
+  preferredProvider?: string;
+  deliveryMethod: DeliveryMethod;
+  preferredDays: string[];
+  notes?: string;
+  status: 'waiting' | 'slot_offered' | 'scheduled' | 'removed';
+  createdAt: string;
+}
+
+export interface SystemSettings {
+  organizationName: string;
+  organizationTagline: string;
+  establishedYear: number;
+  crisisPhone: string;
+  crisisText: string;
+  mainPhone: string;
+  fax: string;
+  intakeEmail: string;
+  primaryAddress: string;
+  mfaEnforcedForAllStaff: boolean;
+  appointmentLeadTimeHours: number;
+  cancellationNoticeHours: number;
+  maintenanceMode: boolean;
+}
