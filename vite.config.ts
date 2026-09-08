@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 
 export default defineConfig({
-  base: '/YOUR-REPOSITORY-NAME/',
+  base: '/hope-community-5639/',
 
   plugins: [
     react(),
