@@ -23,8 +23,26 @@ export const ReferralPartnerPage: React.FC = () => {
     clinicalReason: '',
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    try {
+      await fetch('/api/public/referrals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          referrerName: form.referrerName,
+          referrerOrg: form.referringOrganization,
+          referrerEmail: form.referrerEmail,
+          clientName: `${form.clientFirstName} ${form.clientLastName}`,
+          clientPhone: form.clientPhone,
+          clientEmail: form.clientEmail,
+          serviceNeeded: form.requestedService,
+          urgency: form.urgencyLevel,
+        }),
+      });
+    } catch {
+      // Handled gracefully with dbStore fallback
+    }
     dbStore.submitReferral({
       referringOrganization: form.referringOrganization,
       referrerName: form.referrerName,

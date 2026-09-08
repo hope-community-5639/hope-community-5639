@@ -1,0 +1,48 @@
+# Google Cloud Build Pipeline for Hope Community Support
+# Deploys directly to Cloud Run on approved pushes to main branch
+
+steps:
+  # 1. Build container image using Docker buildkit
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/hope-community-support:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/hope-community-support:latest'
+      - '.'
+
+  # 2. Push container image to Google Container Registry / Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/hope-community-support:$COMMIT_SHA'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/hope-community-support:latest'
+
+  # 3. Deploy to Cloud Run service
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'hope-community-support'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/hope-community-support:$COMMIT_SHA'
+      - '--region'
+      - 'us-east1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--port'
+      - '3000'
+
+images:
+  - 'gcr.io/$PROJECT_ID/hope-community-support:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/hope-community-support:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

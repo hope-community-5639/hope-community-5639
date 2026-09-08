@@ -20,15 +20,9 @@ export const RoleSwitcherBar: React.FC<RoleSwitcherBarProps> = ({ onSwitchRole }
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Hide completely in strict production environments if required
-  if (
-    import.meta.env.PROD &&
-    typeof window !== 'undefined' &&
-    !window.location.hostname.includes('localhost') &&
-    !window.location.hostname.includes('run.app') &&
-    !window.location.hostname.includes('ais-') &&
-    !window.location.search.includes('preview=true')
-  ) {
+  // Hide completely in production unless explicitly enabled via ?demo=true
+  const isDemoMode = typeof window !== 'undefined' && window.location.search.includes('demo=true');
+  if (import.meta.env.PROD && !isDemoMode) {
     return null;
   }
 

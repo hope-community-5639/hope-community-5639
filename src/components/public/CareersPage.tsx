@@ -17,8 +17,25 @@ export const CareersPage: React.FC = () => {
     coverNote: '',
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    try {
+      await fetch('/api/public/careers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobId: form.jobId,
+          jobTitle: form.position,
+          applicantName: form.fullName,
+          applicantEmail: form.email,
+          applicantPhone: form.phone,
+          licenseNumber: form.licenseNumber,
+          coverNote: form.coverNote,
+        }),
+      });
+    } catch {
+      // Handled gracefully with dbStore fallback
+    }
     dbStore.submitJobApplication({
       jobId: form.jobId,
       jobTitle: form.position,

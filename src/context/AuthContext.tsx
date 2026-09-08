@@ -71,10 +71,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return JSON.parse(saved);
         }
       }
-      // Eleanor Vance default client preview
-      return INITIAL_USERS[0];
+      // Eleanor Vance test persona only loaded if explicitly requested via ?demo=true
+      if (typeof window !== 'undefined' && window.location.search.includes('demo=true')) {
+        return INITIAL_USERS[0];
+      }
+      return null;
     } catch {
-      return INITIAL_USERS[0];
+      return null;
     }
   });
 
@@ -206,6 +209,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           throw new Error(`Account temporarily locked due to consecutive failed attempts. Please try again in ${remaining} minute(s).`);
         }
 
+        // Attempt server-side authentication if credentials provided
+        if (password) {
+          try {
+            const apiRes = await fetch('/api/auth/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email, password }),
+            });
+            if (apiRes.ok) {
+              const data = await apiRes.json();
+              if (data.token) {
+                localStorage.setItem('hcs_auth_token', data.token);
+              }
+              const loggedUser: User = {
+                id: data.user.id,
+                email: data.user.email,
+                firstName: data.user.firstName,
+                lastName: data.user.lastName,
+                role: data.user.role as UserRole,
+                phone: data.user.phone,
+                status: 'active',
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              };
+              clearFailedAttempts(email);
+              setCurrentUser(loggedUser);
+              setIsMfaVerified(true);
+              refreshSession();
+              return true;
+            } else if (apiRes.status === 423) {
+              const err = await apiRes.json();
+              throw new Error(err.error || 'Account temporarily locked.');
+            }
+          } catch (netErr: any) {
+            if (netErr.message?.includes('locked')) throw netErr;
+            // Fallback to local store if server unreachable or offline
+          }
+        }
+
         const users = dbStore.getUsers({ id: 'system', role: 'super_admin' } as User);
         const found = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
 
@@ -214,8 +256,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             throw new Error('This account has been temporarily suspended by clinic administration. Please contact (803) 701-9332.');
           }
 
-          // In production, password matches hashed credential.
-          // In test/demo environment, any password of length >= 6 or empty if demo is allowed
           if (password && password.length < 6) {
             recordFailedAttempt(email);
             throw new Error('Invalid credentials. Please verify your email and password.');
@@ -229,7 +269,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return true;
         }
 
-        // If email not found and no password provided or valid password, allow self-service registration
+        // If email not found and valid password, allow self-service registration
         if (password) {
           const check = validatePassword(password);
           if (!check.isValid) {
@@ -262,6 +302,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const passCheck = validatePassword(password);
         if (!passCheck.isValid) {
           throw new Error(passCheck.errors.join('; '));
+        }
+
+        // Try backend registration
+        try {
+          const apiRes = await fetch('/api/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password, firstName, lastName, phone, role }),
+          });
+          if (apiRes.ok) {
+            const data = await apiRes.json();
+            if (data.token) {
+              localStorage.setItem('hcs_auth_token', data.token);
+            }
+            const registeredUser: User = {
+              id: data.user.id,
+              email: data.user.email,
+              firstName: data.user.firstName,
+              lastName: data.user.lastName,
+              role: data.user.role as UserRole,
+              phone: data.user.phone,
+              status: 'active',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            dbStore.registerUser(email, firstName, lastName, role, phone);
+            setCurrentUser(registeredUser);
+            setIsMfaVerified(true);
+            refreshSession();
+            return registeredUser;
+          } else {
+            const err = await apiRes.json();
+            if (err.error) throw new Error(err.error);
+          }
+        } catch (netErr: any) {
+          if (netErr.message && !netErr.message.includes('fetch')) {
+            throw netErr;
+          }
         }
 
         const existing = dbStore.getUsers({ id: 'system', role: 'super_admin' } as User)

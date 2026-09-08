@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 
 export default defineConfig({
-  base: '/hope-community-5639/',
+  base: process.env.VITE_BASE_PATH || '/',
 
   plugins: [
     react(),
@@ -15,6 +15,13 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, '.'),
     },
+  },
+
+  server: {
+    port: 3000,
+    host: '0.0.0.0',
+    hmr: process.env.DISABLE_HMR !== 'true',
+    watch: process.env.DISABLE_HMR === 'true' ? null : {},
   },
 
   build: {

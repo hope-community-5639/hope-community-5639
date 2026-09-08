@@ -36,6 +36,8 @@ jobs:
         run: npm install
 
       - name: Build website
+        env:
+          VITE_BASE_PATH: /hope-community-5639/
         run: npm run build
 
       - name: Configure GitHub Pages

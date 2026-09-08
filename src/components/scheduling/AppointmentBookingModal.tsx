@@ -68,7 +68,7 @@ export const AppointmentBookingModal: React.FC<AppointmentBookingModalProps> = (
     '04:45 PM',
   ];
 
-  const handleBooking = (e: React.FormEvent) => {
+  const handleBooking = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
@@ -86,6 +86,36 @@ export const AppointmentBookingModal: React.FC<AppointmentBookingModalProps> = (
       };
 
       const matchedService = INITIAL_SERVICES.find((s) => s.name === selectedService);
+      const token = typeof window !== 'undefined' ? localStorage.getItem('hcs_auth_token') : null;
+
+      if (token) {
+        try {
+          const apiRes = await fetch('/api/appointments', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              serviceId: matchedService ? matchedService.id : 'srv_01',
+              serviceName: selectedService,
+              deliveryMethod: selectedFormat,
+              participantType: 'individual',
+              appointmentDate: selectedDate,
+              timeSlot: selectedTimeSlot,
+              notes: clientNotes,
+            }),
+          });
+          if (apiRes.status === 409) {
+            const conflict = await apiRes.json();
+            throw new Error(conflict.error || 'This appointment slot is already booked.');
+          }
+        } catch (apiErr: any) {
+          if (apiErr.message?.includes('booked') || apiErr.message?.includes('slot')) {
+            throw apiErr;
+          }
+        }
+      }
 
       const newApt = dbStore.createAppointment(
         {

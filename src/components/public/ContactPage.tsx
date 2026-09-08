@@ -14,8 +14,24 @@ export const ContactPage: React.FC = () => {
     message: '',
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    try {
+      await fetch('/api/public/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: form.name,
+          email: form.email,
+          phone: form.phone,
+          subject: form.subject,
+          preferredContactMethod: form.preferredContact,
+          message: form.message,
+        }),
+      });
+    } catch {
+      // Handled gracefully with dbStore fallback
+    }
     dbStore.submitContactInquiry({
       name: form.name,
       email: form.email,
