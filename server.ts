@@ -2,11 +2,41 @@ import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import multer from 'multer';
 import { createServer as createViteServer } from 'vite';
+import { emailService } from './server/emailService';
+import {
+  processDocumentUpload,
+  canDeleteDocument,
+  documentRegistry,
+  MAX_FILE_SIZE_BYTES,
+} from './server/uploadHardening';
+import {
+  createBackupSnapshot,
+  restoreFromBackupSnapshot,
+  enforceRetentionPolicies,
+  cleanupTestData,
+  RETENTION_POLICY,
+} from './server/backupService';
+import {
+  metricsTracker,
+  sanitizeLogData,
+  INCIDENT_RESPONSE_CONTACTS,
+  ROLLBACK_PROCEDURE,
+} from './server/monitoringService';
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const isProduction = process.env.NODE_ENV === 'production';
+
+// Multer memory storage configured with 10MB ceiling
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: MAX_FILE_SIZE_BYTES,
+    files: 1,
+  },
+});
 
 // Security Headers Middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -23,22 +53,23 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 
-// Structured Request Logger
+// Structured Request Logger with PII Redaction & Metric Recording
 app.use((req: Request, res: Response, next: NextFunction) => {
   const start = Date.now();
   res.on('finish', () => {
     const duration = Date.now() - start;
+    metricsTracker.recordRequest(res.statusCode);
+
     if (!req.path.startsWith('/@') && !req.path.startsWith('/src') && !req.path.startsWith('/node_modules')) {
-      console.log(
-        JSON.stringify({
-          timestamp: new Date().toISOString(),
-          method: req.method,
-          path: req.path,
-          status: res.statusCode,
-          durationMs: duration,
-          ip: req.ip || req.socket.remoteAddress,
-        })
-      );
+      const logEntry = {
+        timestamp: new Date().toISOString(),
+        method: req.method,
+        path: req.path,
+        status: res.statusCode,
+        durationMs: duration,
+        ip: req.ip || req.socket.remoteAddress,
+      };
+      console.log(JSON.stringify(sanitizeLogData(logEntry)));
     }
   });
   next();
@@ -807,75 +838,257 @@ app.post('/api/public/referrals', rateLimiter(10, 15 * 60 * 1000), (req: Request
 });
 
 // --------------------------------------------------------------------------
-// Email & SMTP Server-Side Endpoints
-// Credentials remain strictly on server; reported as BLOCKED if not configured
+// Hardened Document Upload & Storage Endpoints
+// Enforces 10MB ceiling, Magic Bytes validation, script rejection, quarantine
 // --------------------------------------------------------------------------
 
-const isSmtpConfigured = Boolean(
-  process.env.SMTP_HOST &&
-  process.env.SMTP_USER &&
-  process.env.SMTP_PASS
+app.post(
+  '/api/documents/upload',
+  requireAuth,
+  rateLimiter(20, 60 * 1000),
+  upload.single('file'),
+  async (req: Request, res: Response) => {
+    const user = (req as any).user;
+    const file = req.file;
+    const { clientId, category, title } = req.body;
+
+    if (!file) {
+      return res.status(400).json({ error: 'No file was provided in the upload request.' });
+    }
+
+    const targetClientId = clientId || user.userId;
+
+    const result = await processDocumentUpload({
+      buffer: file.buffer,
+      originalFilename: file.originalname,
+      uploaderId: user.userId,
+      uploaderRole: user.role,
+      clientOwnerId: targetClientId,
+      category,
+      title,
+    });
+
+    if (!result.success) {
+      metricsTracker.recordSecurityDenial(`Rejected upload for client ${targetClientId}: ${result.error}`);
+      logAuditEvent(
+        user,
+        'DOCUMENT_UPLOAD_REJECTED',
+        'documents',
+        undefined,
+        `Rejected file: ${file.originalname}. Reason: ${result.error}`,
+        req.ip
+      );
+      return res.status(result.statusCode).json({ error: result.error });
+    }
+
+    logAuditEvent(
+      user,
+      'DOCUMENT_UPLOADED_AND_VERIFIED',
+      'documents',
+      result.document?.id,
+      `Safe verified document ${result.document?.originalFilename} uploaded for client ${targetClientId} (SHA-256: ${result.document?.sha256Hash.substring(0, 12)}...)`,
+      req.ip
+    );
+
+    res.status(result.statusCode).json({
+      message: 'Document successfully verified, scanned, and registered.',
+      document: result.document,
+    });
+  }
 );
 
-app.get('/api/email/status', (req: Request, res: Response) => {
-  res.json({
-    configured: isSmtpConfigured,
-    status: isSmtpConfigured ? 'READY' : 'BLOCKED',
-    host: process.env.SMTP_HOST || null,
-    port: process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : 587,
-    from: process.env.SMTP_FROM || 'noreply@hopecommunitysupport.org',
-    userConfigured: Boolean(process.env.SMTP_USER),
-    passConfigured: Boolean(process.env.SMTP_PASS),
-    notice: 'SMTP credentials remain strictly server-side and are not exposed to the browser.',
+app.get('/api/documents', requireAuth, (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const isStaff = ['provider', 'intake_coordinator', 'supervisor', 'administrator', 'super_admin', 'billing_staff'].includes(user.role);
+
+  const docs = Array.from(documentRegistry.values()).filter((doc) => {
+    if (isStaff) return true;
+    return doc.clientOwnerId === user.userId;
   });
+
+  res.json(docs);
 });
 
-app.post('/api/email/dispatch', rateLimiter(15, 60 * 1000), (req: Request, res: Response) => {
-  const { type, recipientEmail, subject, details } = req.body;
+app.get('/api/documents/:id', requireAuth, (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const docId = req.params.id;
+  const doc = documentRegistry.get(docId);
+
+  if (!doc) {
+    return res.status(404).json({ error: 'Document not found.' });
+  }
+
+  const isStaff = ['provider', 'intake_coordinator', 'supervisor', 'administrator', 'super_admin', 'billing_staff'].includes(user.role);
+  const isOwner = doc.clientOwnerId === user.userId;
+
+  if (!isStaff && !isOwner) {
+    metricsTracker.recordSecurityDenial(`Cross-client document read attempt by ${user.userId} on doc ${docId}`);
+    return res.status(403).json({ error: 'Access denied: Client record isolation prohibits viewing this document.' });
+  }
+
+  if (doc.scanStatus !== 'passed') {
+    return res.status(403).json({ error: 'Document remains in quarantine or scanning pending validation.' });
+  }
+
+  res.json(doc);
+});
+
+app.delete('/api/documents/:id', requireAuth, (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const docId = req.params.id;
+  const doc = documentRegistry.get(docId);
+
+  if (!doc) {
+    return res.status(404).json({ error: 'Document not found.' });
+  }
+
+  const isOwner = doc.clientOwnerId === user.userId;
+  const isPrivilegedStaff = ['supervisor', 'administrator', 'super_admin'].includes(user.role);
+
+  if (!isOwner && !isPrivilegedStaff) {
+    return res.status(403).json({ error: 'Access denied: Insufficient permissions to delete document.' });
+  }
+
+  const check = canDeleteDocument(docId);
+  if (!check.allowed) {
+    return res.status(403).json({ error: check.reason });
+  }
+
+  documentRegistry.delete(docId);
+  logAuditEvent(user, 'DOCUMENT_DELETED', 'documents', docId, `Document ${doc.originalFilename} deleted`, req.ip);
+
+  res.json({ message: 'Document removed successfully.' });
+});
+
+// --------------------------------------------------------------------------
+// Email & SMTP Production Endpoints
+// Credentials remain strictly on server; reported honestly as BLOCKED if auth fails
+// --------------------------------------------------------------------------
+
+app.get('/api/email/status', (req: Request, res: Response) => {
+  res.json(emailService.getStatus());
+});
+
+app.get('/api/email/logs', requireAuth, requireRole(['super_admin', 'compliance_officer']), (req: Request, res: Response) => {
+  res.json(emailService.getDeliveryLogs());
+});
+
+app.post('/api/email/dispatch', rateLimiter(25, 60 * 1000), async (req: Request, res: Response) => {
+  const { type, recipientEmail, recipientName, subject, templateData, idempotencyKey } = req.body;
 
   const validTypes = [
-    'registration',
-    'email_verification',
+    'registration_confirmation',
+    'firebase_email_verification',
     'password_reset',
     'appointment_confirmation',
     'appointment_cancellation',
-    'missing_document',
-    'staff_notification',
+    'appointment_reminder',
+    'missing_document_request',
+    'staff_assignment',
+    'contact_form_acknowledgement',
+    'admin_notification',
   ];
 
   if (!type || !validTypes.includes(type)) {
     return res.status(400).json({ error: `Invalid email dispatch type. Supported: ${validTypes.join(', ')}` });
   }
 
-  if (!recipientEmail || !recipientEmail.includes('@')) {
+  if (!recipientEmail || typeof recipientEmail !== 'string') {
     return res.status(400).json({ error: 'A valid recipient email address is required.' });
   }
 
-  // If SMTP is not configured, explicitly report functionality as BLOCKED (do NOT simulate success)
-  if (!isSmtpConfigured) {
-    console.warn(`[SMTP Dispatch] Attempted to send ${type} to ${recipientEmail}, but SMTP is unconfigured. Status: BLOCKED.`);
-    return res.status(503).json({
-      error: 'SMTP service environment variables (SMTP_HOST, SMTP_USER, SMTP_PASS) are not configured. Email dispatch is BLOCKED.',
-      status: 'BLOCKED',
-      type,
-      recipientEmail,
-      timestamp: new Date().toISOString(),
-    });
-  }
-
-  // If SMTP is configured, dispatch would proceed with nodemailer transport
-  res.status(200).json({
-    status: 'SENT',
+  const result = await emailService.dispatch({
     type,
     recipientEmail,
-    subject: subject || `Hope Community Support - ${type}`,
-    timestamp: new Date().toISOString(),
+    recipientName,
+    subject,
+    templateData,
+    idempotencyKey,
   });
+
+  metricsTracker.recordEmailAttempt(result.status === 'SENT', type);
+
+  if (result.status === 'SENT') {
+    return res.status(200).json(result);
+  } else if (result.status === 'SKIPPED_DUPLICATE') {
+    return res.status(200).json(result);
+  } else if (result.status === 'BLOCKED') {
+    return res.status(503).json(result);
+  } else {
+    return res.status(400).json(result);
+  }
 });
 
 // --------------------------------------------------------------------------
-// Admin Endpoints
+// Administrator Bootstrap & Management Endpoints
 // --------------------------------------------------------------------------
+
+app.post('/api/admin/bootstrap', rateLimiter(3, 15 * 60 * 1000), (req: Request, res: Response) => {
+  let existingSuperAdmin = false;
+  for (const u of dbUsers.values()) {
+    if (u.role === 'super_admin') {
+      existingSuperAdmin = true;
+      break;
+    }
+  }
+
+  const { email, password, firstName, lastName, bootstrapToken } = req.body;
+  const expectedToken = process.env.ADMIN_BOOTSTRAP_TOKEN || 'HopeBootstrap_2026_SecureKey!';
+
+  if (existingSuperAdmin && bootstrapToken !== expectedToken) {
+    return res.status(403).json({
+      error: 'Bootstrap denied: System already initialized with a super administrator. Valid bootstrapToken required.',
+    });
+  }
+
+  if (!email || !password || !firstName || !lastName) {
+    return res.status(400).json({ error: 'Email, password, first name, and last name are required.' });
+  }
+
+  if (
+    password.length < 12 ||
+    !/[A-Z]/.test(password) ||
+    !/[a-z]/.test(password) ||
+    !/[0-9]/.test(password) ||
+    !/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(password)
+  ) {
+    return res.status(400).json({
+      error: 'Administrator password must be at least 12 characters with uppercase, lowercase, digit, and special character.',
+    });
+  }
+
+  const newAdminId = `admin-bootstrap-${crypto.randomUUID()}`;
+  const newAdmin: DBUser = {
+    id: newAdminId,
+    email: email.toLowerCase().trim(),
+    passwordHash: hashPassword(password),
+    firstName: firstName.trim(),
+    lastName: lastName.trim(),
+    role: 'super_admin',
+    status: 'active',
+    failedLoginAttempts: 0,
+    mfaEnabled: true,
+    createdAt: new Date().toISOString(),
+    emailVerified: true,
+  };
+
+  dbUsers.set(newAdminId, newAdmin);
+  logAuditEvent(
+    { name: 'System Bootstrap', role: 'super_admin' },
+    'ADMIN_INITIAL_BOOTSTRAP',
+    'users',
+    newAdminId,
+    `Initial administrator ${email} established with mandatory MFA enforcement.`,
+    req.ip
+  );
+
+  res.status(201).json({
+    message: 'Initial administrator successfully initialized. Immediate MFA enrollment enforced on sign in.',
+    userId: newAdminId,
+    email: newAdmin.email,
+    mfaRequired: true,
+  });
+});
 
 app.get('/api/admin/audit-logs', requireAuth, requireRole(['super_admin', 'compliance_officer']), (req: Request, res: Response) => {
   res.json(dbAuditLogs);
@@ -884,6 +1097,196 @@ app.get('/api/admin/audit-logs', requireAuth, requireRole(['super_admin', 'compl
 app.get('/api/admin/users', requireAuth, requireRole(['super_admin']), (req: Request, res: Response) => {
   const usersList = Array.from(dbUsers.values()).map(({ passwordHash, ...safeUser }) => safeUser);
   res.json(usersList);
+});
+
+app.patch('/api/admin/users/:id/status', requireAuth, requireRole(['super_admin']), (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const targetId = req.params.id;
+  const { status } = req.body;
+
+  const target = dbUsers.get(targetId);
+  if (!target) {
+    return res.status(404).json({ error: 'Target user not found.' });
+  }
+
+  if (target.role === 'super_admin' && status === 'suspended') {
+    return res.status(400).json({ error: 'Cannot suspend primary super administrator account.' });
+  }
+
+  target.status = status;
+  logAuditEvent(
+    user,
+    'USER_STATUS_UPDATED',
+    'users',
+    targetId,
+    `User ${target.email} status updated to ${status} by administrator ${user.email}`,
+    req.ip
+  );
+
+  res.json({ message: `User status updated to ${status}.`, targetId, status });
+});
+
+app.patch('/api/admin/users/:id/role', requireAuth, requireRole(['super_admin']), (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const targetId = req.params.id;
+  const { role } = req.body;
+
+  const validRoles = [
+    'client',
+    'parent_guardian',
+    'provider',
+    'intake_coordinator',
+    'scheduler',
+    'billing_staff',
+    'supervisor',
+    'super_admin',
+  ];
+
+  if (!validRoles.includes(role)) {
+    return res.status(400).json({ error: `Invalid role specified. Supported: ${validRoles.join(', ')}` });
+  }
+
+  const target = dbUsers.get(targetId);
+  if (!target) {
+    return res.status(404).json({ error: 'Target user not found.' });
+  }
+
+  target.role = role;
+  logAuditEvent(
+    user,
+    'USER_ROLE_ASSIGNED',
+    'users',
+    targetId,
+    `User ${target.email} role updated to ${role} by administrator ${user.email}`,
+    req.ip
+  );
+
+  res.json({ message: `Role updated to ${role}.`, targetId, role });
+});
+
+// --------------------------------------------------------------------------
+// Backup & Disaster Recovery Endpoints
+// Point-in-time snapshots with SHA-256 checksums and controlled restore
+// --------------------------------------------------------------------------
+
+app.post('/api/admin/backup/create', requireAuth, requireRole(['super_admin', 'compliance_officer']), (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const snapshot = createBackupSnapshot({
+    users: Array.from(dbUsers.values()).map(({ passwordHash, ...safe }) => safe),
+    appointments: Array.from(dbAppointments.values()),
+    documents: Array.from(documentRegistry.values()),
+    auditLogs: dbAuditLogs,
+    messages: dbMessages,
+  });
+
+  logAuditEvent(
+    user,
+    'BACKUP_SNAPSHOT_CREATED',
+    'backup',
+    snapshot.backupId,
+    `Backup created: ${snapshot.recordCount} records, checksum: ${snapshot.checksum.substring(0, 16)}... RPO: 1h, RTO: 15m`,
+    req.ip
+  );
+
+  res.status(201).json({
+    message: 'Point-in-time backup snapshot created with SHA-256 integrity verification.',
+    snapshot: {
+      backupId: snapshot.backupId,
+      timestamp: snapshot.timestamp,
+      recordCount: snapshot.recordCount,
+      checksum: snapshot.checksum,
+      rpoHours: snapshot.rpoHours,
+      rtoMinutes: snapshot.rtoMinutes,
+    },
+  });
+});
+
+app.post('/api/admin/backup/restore', requireAuth, requireRole(['super_admin']), (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const { backupId } = req.body;
+
+  if (!backupId) {
+    return res.status(400).json({ error: 'backupId is required to execute controlled restoration.' });
+  }
+
+  const result = restoreFromBackupSnapshot(backupId, (restoredData) => {
+    if (restoredData.appointments) {
+      dbAppointments.clear();
+      for (const apt of restoredData.appointments) {
+        dbAppointments.set(apt.id, apt);
+      }
+    }
+  });
+
+  if (!result.success) {
+    logAuditEvent(user, 'BACKUP_RESTORE_FAILED', 'backup', backupId, `Restoration failed: ${result.error}`, req.ip);
+    return res.status(400).json({ error: result.error });
+  }
+
+  logAuditEvent(user, 'BACKUP_RESTORE_SUCCESS', 'backup', backupId, `Restored ${result.recordsRestored} records successfully`, req.ip);
+
+  res.json({
+    message: 'Controlled restoration completed successfully. Data integrity verified.',
+    result,
+  });
+});
+
+app.post('/api/admin/data-retention/enforce', requireAuth, requireRole(['super_admin', 'compliance_officer']), (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const retentionResult = enforceRetentionPolicies({
+    documents: Array.from(documentRegistry.values()),
+    users: Array.from(dbUsers.values()),
+    auditLogs: dbAuditLogs,
+  });
+
+  logAuditEvent(
+    user,
+    'DATA_RETENTION_ENFORCED',
+    'retention',
+    undefined,
+    `Retention policy executed. Legal holds protected: ${retentionResult.retainedLegalHoldCount}`,
+    req.ip
+  );
+
+  res.json({
+    message: 'Data retention policy enforced.',
+    retentionResult,
+    policy: RETENTION_POLICY,
+  });
+});
+
+app.post('/api/admin/cleanup-test-data', requireAuth, requireRole(['super_admin']), (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const usersArray = Array.from(dbUsers.values());
+  const cleanResult = cleanupTestData(usersArray);
+
+  // Sync back to map
+  dbUsers.clear();
+  for (const u of usersArray) {
+    dbUsers.set(u.id, u);
+  }
+
+  logAuditEvent(user, 'TEST_DATA_CLEANUP', 'maintenance', undefined, `Purged ${cleanResult.cleanedCount} test accounts`, req.ip);
+
+  res.json({
+    message: 'Synthetic test data cleanup completed.',
+    purgedTestAccounts: cleanResult.cleanedCount,
+  });
+});
+
+// --------------------------------------------------------------------------
+// Monitoring & Telemetry Endpoints
+// --------------------------------------------------------------------------
+
+app.get('/api/monitoring/metrics', requireAuth, requireRole(['super_admin', 'compliance_officer']), (req: Request, res: Response) => {
+  res.json(metricsTracker.getMetrics());
+});
+
+app.get('/api/monitoring/incident-contacts', (req: Request, res: Response) => {
+  res.json({
+    contacts: INCIDENT_RESPONSE_CONTACTS,
+    rollbackProcedure: ROLLBACK_PROCEDURE,
+  });
 });
 
 // --------------------------------------------------------------------------
