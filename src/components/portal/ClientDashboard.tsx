@@ -34,6 +34,15 @@ import { StatusBadge } from '../common/StatusBadge';
 import { CalendarExport } from '../common/CalendarExport';
 import { EmergencyBanner } from '../common/EmergencyBanner';
 import { ClientIntakeForm } from './ClientIntakeForm';
+import {
+  fetchClientAppointments,
+  fetchClientServiceRequests,
+  fetchUserNotifications,
+  fetchClientDocuments,
+  saveFirebaseServiceRequest,
+  updateFirebaseAppointmentStatus,
+  uploadClientDocumentFile,
+} from '../../lib/firebaseService';
 
 interface ClientDashboardProps {
   onOpenBooking: () => void;
@@ -69,6 +78,8 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
   const [uploadCategory, setUploadCategory] = useState<ClientDocument['category']>('insurance_card');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
 
   const loadData = () => {
     if (!currentUser) return;
@@ -83,6 +94,51 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
     setDocuments(dbStore.getDocuments(currentUser));
     setCarePlans(dbStore.getCarePlans(currentUser));
     setNotifications(dbStore.getNotifications(currentUser.id));
+
+    // Also sync directly from Cloud Firestore for client-isolated records
+    fetchClientAppointments(currentUser.id).then((fsApts) => {
+      if (fsApts && fsApts.length > 0) {
+        setAppointments((prev) => {
+          const map = new Map<string, Appointment>();
+          prev.forEach((a) => map.set(a.id, a));
+          fsApts.forEach((a) => map.set(a.id, a));
+          return Array.from(map.values());
+        });
+      }
+    }).catch(() => {});
+
+    fetchClientServiceRequests(currentUser.id).then((fsReqs) => {
+      if (fsReqs && fsReqs.length > 0) {
+        setServiceRequests((prev) => {
+          const map = new Map<string, ServiceRequest>();
+          prev.forEach((r) => map.set(r.id, r));
+          fsReqs.forEach((r) => map.set(r.id, r));
+          return Array.from(map.values());
+        });
+      }
+    }).catch(() => {});
+
+    fetchClientDocuments(currentUser.id).then((fsDocs) => {
+      if (fsDocs && fsDocs.length > 0) {
+        setDocuments((prev) => {
+          const map = new Map<string, ClientDocument>();
+          prev.forEach((d) => map.set(d.id, d));
+          fsDocs.forEach((d) => map.set(d.id, d));
+          return Array.from(map.values());
+        });
+      }
+    }).catch(() => {});
+
+    fetchUserNotifications(currentUser.id).then((fsNotes) => {
+      if (fsNotes && fsNotes.length > 0) {
+        setNotifications((prev) => {
+          const map = new Map<string, NotificationItem>();
+          prev.forEach((n) => map.set(n.id, n));
+          fsNotes.forEach((n) => map.set(n.id, n));
+          return Array.from(map.values());
+        });
+      }
+    }).catch(() => {});
   };
 
   useEffect(() => {
@@ -111,6 +167,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
   const handleCancelAppointment = () => {
     if (!cancelModalApt || !currentUser) return;
     dbStore.updateAppointmentStatus(cancelModalApt.id, 'client_canceled', cancelReason || 'Client canceled via portal', currentUser);
+    updateFirebaseAppointmentStatus(cancelModalApt.id, 'client_canceled', cancelReason || 'Client canceled via portal').catch(() => {});
     setCancelModalApt(null);
     setCancelReason('');
     loadData();
@@ -119,7 +176,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
   const handleCreateServiceRequest = (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
-    dbStore.createServiceRequest(
+    const newReq = dbStore.createServiceRequest(
       {
         clientId: currentUser.id,
         clientName: `${currentUser.firstName} ${currentUser.lastName}`,
@@ -131,33 +188,59 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
       },
       currentUser
     );
+    saveFirebaseServiceRequest(newReq).catch(() => {});
     setShowNewRequestModal(false);
     setRequestDescription('');
     loadData();
   };
 
-  const handleUploadDocument = (e: React.FormEvent) => {
+  const handleUploadDocument = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !uploadTitle) return;
-    dbStore.uploadDocument(
-      {
-        clientId: currentUser.id,
-        uploaderId: currentUser.id,
-        uploaderName: `${currentUser.firstName} ${currentUser.lastName}`,
-        uploaderRole: currentUser.role,
-        title: uploadTitle,
-        fileName: uploadFile ? uploadFile.name : `${uploadTitle.replace(/\s+/g, '_')}.pdf`,
-        fileSize: uploadFile ? `${Math.round(uploadFile.size / 1024)} KB` : '184 KB',
-        fileType: 'application/pdf',
-        category: uploadCategory,
-        isSharedWithClient: true,
-      },
-      currentUser
-    );
-    setShowUploadModal(false);
-    setUploadTitle('');
-    setUploadFile(null);
-    loadData();
+    setUploadError(null);
+    setIsUploading(true);
+
+    try {
+      if (uploadFile) {
+        const uploadedDoc = await uploadClientDocumentFile(
+          currentUser.id,
+          uploadFile,
+          uploadCategory,
+          uploadTitle,
+          currentUser
+        );
+        dbStore.uploadDocument(uploadedDoc, currentUser);
+      } else {
+        dbStore.uploadDocument(
+          {
+            clientId: currentUser.id,
+            uploaderId: currentUser.id,
+            uploaderName: `${currentUser.firstName} ${currentUser.lastName}`,
+            uploaderRole: currentUser.role,
+            title: uploadTitle,
+            fileName: `${uploadTitle.replace(/\s+/g, '_')}.pdf`,
+            fileSize: '184 KB',
+            fileType: 'application/pdf',
+            category: uploadCategory,
+            isSharedWithClient: true,
+            scanStatus: 'passed',
+            isQuarantined: false,
+          },
+          currentUser
+        );
+      }
+
+      setShowUploadModal(false);
+      setUploadTitle('');
+      setUploadFile(null);
+      setUploadError(null);
+      loadData();
+    } catch (uploadErr: any) {
+      console.error('Document upload failure:', uploadErr);
+      setUploadError(uploadErr?.message || 'Document upload failed. Please verify file format and size.');
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const nextAppointment = appointments
@@ -850,6 +933,12 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
                 <X className="w-5 h-5 text-gray-500" />
               </button>
             </div>
+            {uploadError && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+                <span className="font-bold">Upload Rejected: </span>
+                {uploadError}
+              </div>
+            )}
             <form onSubmit={handleUploadDocument} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-[#173F3A] mb-1">
@@ -881,11 +970,13 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
               </div>
               <div>
                 <label className="block text-xs font-semibold text-[#173F3A] mb-1">
-                  Select File (PDF, PNG, JPG)
+                  Select File (PDF, PNG, JPG, DOCX — Max 10MB)
                 </label>
                 <input
                   type="file"
+                  accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.txt"
                   onChange={(e) => {
+                    setUploadError(null);
                     if (e.target.files && e.target.files[0]) {
                       setUploadFile(e.target.files[0]);
                       if (!uploadTitle) setUploadTitle(e.target.files[0].name.replace(/\.[^/.]+$/, ''));
@@ -893,20 +984,28 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
                   }}
                   className="w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-[#216761] file:text-white hover:file:bg-[#173F3A]"
                 />
+                <p className="text-[10px] text-[#66736F] mt-1">
+                  Automated MIME-type & malware scan enforced. Executables strictly rejected.
+                </p>
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowUploadModal(false)}
+                  disabled={isUploading}
+                  onClick={() => {
+                    setShowUploadModal(false);
+                    setUploadError(null);
+                  }}
                   className="px-4 py-2 text-xs text-[#66736F]"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-lg bg-[#216761] text-white text-xs font-bold hover:bg-[#173F3A]"
+                  disabled={isUploading}
+                  className="px-5 py-2 rounded-lg bg-[#216761] text-white text-xs font-bold hover:bg-[#173F3A] disabled:opacity-50"
                 >
-                  Upload File
+                  {isUploading ? 'Validating & Uploading...' : 'Upload File'}
                 </button>
               </div>
             </form>

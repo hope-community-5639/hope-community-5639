@@ -13,6 +13,7 @@ import {
   PenTool,
 } from 'lucide-react';
 import { StatusBadge } from '../common/StatusBadge';
+import { saveClientProfile } from '../../lib/firebaseService';
 
 interface ClientIntakeFormProps {
   existingIntake?: IntakeSubmission;
@@ -116,6 +117,19 @@ export const ClientIntakeForm: React.FC<ClientIntakeFormProps> = ({
       },
       currentUser
     );
+
+    // Persist confidential client profile to Firestore
+    saveClientProfile(currentUser.id, {
+      dateOfBirth: formData.dateOfBirth,
+      phone: formData.phone,
+      address: formData.address,
+      emergencyContactName: formData.emergencyContactName,
+      emergencyContactPhone: formData.emergencyContactPhone,
+      emergencyContactRelation: formData.emergencyContactRelation,
+      preferredLanguage: formData.preferredLanguage,
+    }).catch((fsErr) => {
+      console.warn('Could not sync client profile to Firestore:', fsErr);
+    });
 
     setSubmittedSuccess(true);
     setTimeout(() => {

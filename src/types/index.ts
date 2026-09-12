@@ -21,6 +21,7 @@ export interface User {
   status: 'active' | 'suspended' | 'pending_verification';
   mfaEnabled?: boolean;
   createdAt: string;
+  updatedAt?: string;
   lastLoginAt?: string;
 }
 
@@ -52,6 +53,8 @@ export interface ServiceItem {
   availableFormats: DeliveryMethod[];
   faqs: { question: string; answer: string }[];
   durationMinutes: number;
+  description?: string;
+  deliveryMethods?: DeliveryMethod[];
 }
 
 export type AppointmentStatus =
@@ -121,6 +124,9 @@ export interface IntakeSubmission {
   staffReviewerNotes?: string;
   submittedAt: string;
   reviewedAt?: string;
+  signature?: string;
+  signedAt?: string;
+  data?: any;
 }
 
 export type ServiceRequestStatus =
@@ -143,6 +149,7 @@ export interface ServiceRequest {
   preferredDelivery: DeliveryMethod;
   urgency: 'routine' | 'urgent_non_emergency' | 'flexible';
   details: string;
+  description?: string;
   preferredTimes: string[];
   status: ServiceRequestStatus;
   assignedStaffId?: string;
@@ -190,10 +197,22 @@ export interface ClientDocument {
   fileName: string;
   fileSize: string;
   fileType: string;
-  category: 'intake_consent' | 'insurance_id' | 'assessment' | 'care_plan' | 'referral' | 'general';
+  category: 'intake_consent' | 'insurance_id' | 'insurance_card' | 'assessment' | 'care_plan' | 'referral' | 'general';
   isSharedWithClient: boolean;
   uploadedAt: string;
   expiresAt?: string;
+  storagePath?: string;
+  downloadUrl?: string;
+  scanStatus?: 'passed' | 'pending' | 'quarantined';
+  isQuarantined?: boolean;
+}
+
+export interface CarePlanGoal {
+  id: string;
+  title: string;
+  description: string;
+  status: string;
+  milestones: Array<{ title: string; completed: boolean }>;
 }
 
 export interface CarePlan {
@@ -209,6 +228,9 @@ export interface CarePlan {
   status: 'active' | 'under_review' | 'completed';
   createdAt: string;
   updatedAt: string;
+  goals?: CarePlanGoal[];
+  targetProblem?: string;
+  nextReviewDate?: string;
 }
 
 export interface AuditLog {
@@ -285,9 +307,11 @@ export interface ContactInquiry {
   phone: string;
   subject: string;
   preferredContact: 'phone' | 'email';
+  preferredContactMethod?: 'phone' | 'email';
   message: string;
-  status: 'new' | 'contacted' | 'resolved' | 'converted_to_intake';
+  status: 'new' | 'contacted' | 'resolved' | 'converted_to_intake' | 'reviewing';
   staffNotes?: string;
+  responseNotes?: string;
   createdAt: string;
 }
 
@@ -314,6 +338,18 @@ export interface ReferralItem {
   internalNotes?: string;
   createdAt: string;
   updatedAt: string;
+  clientName?: string;
+  clientDob?: string;
+  referringOrg?: string;
+  referringContact?: string;
+  referringPhone?: string;
+  referringEmail?: string;
+  serviceRequested?: string;
+  urgency?: string;
+  reasonForReferral?: string;
+  insuranceInfo?: string;
+  submittedAt?: string;
+  intakeNotes?: string;
 }
 
 export interface JobOpening {
@@ -357,8 +393,10 @@ export interface WaitlistEntry {
   deliveryMethod: DeliveryMethod;
   preferredDays: string[];
   notes?: string;
-  status: 'waiting' | 'slot_offered' | 'scheduled' | 'removed';
+  status: 'waiting' | 'slot_offered' | 'scheduled' | 'removed' | 'contacted';
   createdAt: string;
+  serviceDesired?: string;
+  preferredDelivery?: string;
 }
 
 export interface SystemSettings {
@@ -375,4 +413,10 @@ export interface SystemSettings {
   appointmentLeadTimeHours: number;
   cancellationNoticeHours: number;
   maintenanceMode: boolean;
+  address?: string;
+  officeHours?: string;
+  emergencyNotice?: string;
+  legalName?: string;
+  phone?: string;
+  email?: string;
 }

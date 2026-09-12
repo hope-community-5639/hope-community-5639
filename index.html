@@ -12,6 +12,55 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&display=swap" rel="stylesheet" />
+    <script>
+      // Strictly filter only verified third-party browser extension errors (e.g. chrome-extension://, moz-extension://, MetaMask provider injection)
+      (function() {
+        var isExtensionNoise = function(err) {
+          if (!err) return false;
+          var msg = String(err.message || err.reason?.message || err.reason || err || '');
+          var stack = String(err.stack || err.reason?.stack || '');
+          var filename = String(err.filename || '');
+          var fullStr = (msg + ' ' + stack + ' ' + filename).toLowerCase();
+
+          // CRITICAL: NEVER suppress genuine application, Firebase, network, or server errors
+          if (
+            /firebase|firestore|auth\/|storage\/|permission-denied|network|failed to fetch|api\/|smtp|email|applet|boundary/i.test(fullStr)
+          ) {
+            return false;
+          }
+
+          // Positively identify third-party browser extension origins only
+          var isExtensionUrl = filename.indexOf('chrome-extension://') !== -1 ||
+                               filename.indexOf('moz-extension://') !== -1 ||
+                               filename.indexOf('safari-web-extension://') !== -1 ||
+                               stack.indexOf('chrome-extension://') !== -1 ||
+                               stack.indexOf('moz-extension://') !== -1;
+
+          var isKnownExtensionInjection = /evmask|metamask|phantom|tronlink|inpage\.js|content-script/i.test(fullStr) &&
+                                          !/hopecommunity|react|src\//i.test(fullStr);
+
+          return isExtensionUrl || isKnownExtensionInjection;
+        };
+
+        window.addEventListener('error', function(e) {
+          if (isExtensionNoise(e) || isExtensionNoise(e.error)) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            return true;
+          }
+          // Genuine errors remain logged and active for ErrorBoundary and debugging
+        }, true);
+
+        window.addEventListener('unhandledrejection', function(e) {
+          if (isExtensionNoise(e.reason)) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            return true;
+          }
+          // Genuine errors remain logged and active for ErrorBoundary and debugging
+        }, true);
+      })();
+    </script>
   </head>
   <body class="bg-[#F8F5EE] text-[#202826] antialiased selection:bg-[#216761] selection:text-white">
     <div id="root"></div>

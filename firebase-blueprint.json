@@ -1,0 +1,191 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User account profile and authentication metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique User UID matching Firebase Auth UID" },
+        "email": { "type": "string", "format": "email", "description": "User email address" },
+        "firstName": { "type": "string", "maxLength": 100, "description": "User given name" },
+        "lastName": { "type": "string", "maxLength": 100, "description": "User family name" },
+        "role": { "type": "string", "enum": ["client", "parent_guardian", "provider", "scheduler", "intake_coordinator", "supervisor", "billing_staff", "content_editor", "administrator", "super_admin"] },
+        "phone": { "type": "string", "maxLength": 30, "description": "Primary phone number" },
+        "status": { "type": "string", "enum": ["active", "suspended", "pending_verification"] },
+        "createdAt": { "type": "string", "description": "Account registration timestamp" },
+        "updatedAt": { "type": "string", "description": "Last profile update timestamp" }
+      },
+      "required": ["id", "email", "firstName", "lastName", "role", "status"]
+    },
+    "ClientProfile": {
+      "title": "ClientProfile",
+      "description": "HIPAA-compliant client clinical intake and contact profile",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID of the client" },
+        "dateOfBirth": { "type": "string", "description": "Client date of birth" },
+        "genderIdentity": { "type": "string", "maxLength": 50 },
+        "preferredPronouns": { "type": "string", "maxLength": 50 },
+        "address": { "type": "string", "maxLength": 255 },
+        "emergencyContactName": { "type": "string", "maxLength": 150 },
+        "emergencyContactPhone": { "type": "string", "maxLength": 30 },
+        "emergencyContactRelation": { "type": "string", "maxLength": 50 },
+        "preferredLanguage": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["userId"]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "Client behavioral health counseling or intake appointment",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "clientId": { "type": "string", "description": "Auth UID of the client booking the session" },
+        "clientName": { "type": "string", "maxLength": 150 },
+        "clientEmail": { "type": "string", "format": "email" },
+        "clientPhone": { "type": "string", "maxLength": 30 },
+        "providerId": { "type": "string" },
+        "providerName": { "type": "string", "maxLength": 150 },
+        "serviceId": { "type": "string", "maxLength": 100 },
+        "serviceName": { "type": "string", "maxLength": 150 },
+        "deliveryMethod": { "type": "string", "enum": ["office", "in_home", "telehealth"] },
+        "participantType": { "type": "string", "enum": ["individual", "couple", "family", "group"] },
+        "date": { "type": "string", "description": "Appointment date YYYY-MM-DD" },
+        "timeSlot": { "type": "string", "description": "Scheduled time slot" },
+        "durationMinutes": { "type": "number" },
+        "status": { "type": "string", "enum": ["requested", "under_review", "confirmed", "rescheduled", "checked_in", "completed", "client_canceled", "staff_canceled", "no_show"] },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["clientId", "clientName", "serviceId", "serviceName", "deliveryMethod", "date", "timeSlot", "status"]
+    },
+    "ServiceRequest": {
+      "title": "ServiceRequest",
+      "description": "Community care and support coordination service request",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string", "maxLength": 150 },
+        "serviceType": { "type": "string", "maxLength": 150 },
+        "preferredDelivery": { "type": "string", "enum": ["office", "in_home", "telehealth"] },
+        "urgency": { "type": "string", "enum": ["routine", "urgent_non_emergency", "flexible"] },
+        "details": { "type": "string", "maxLength": 2000 },
+        "status": { "type": "string", "enum": ["draft", "submitted", "under_review", "more_info_required", "assigned", "scheduled", "completed", "closed", "declined", "referred_elsewhere"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["clientId", "serviceType", "preferredDelivery", "details", "status"]
+    },
+    "NotificationItem": {
+      "title": "NotificationItem",
+      "description": "In-app alerts for appointments, care updates, and notices",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string", "description": "Recipient User UID" },
+        "title": { "type": "string", "maxLength": 200 },
+        "message": { "type": "string", "maxLength": 1000 },
+        "type": { "type": "string", "enum": ["appointment", "intake", "message", "security", "system"] },
+        "isRead": { "type": "boolean" },
+        "actionUrl": { "type": "string", "maxLength": 255 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["userId", "title", "message", "type", "isRead"]
+    },
+    "StaffAvailability": {
+      "title": "StaffAvailability",
+      "description": "Clinical provider profile, accepted formats, and active schedule",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string", "maxLength": 150 },
+        "credentials": { "type": "string", "maxLength": 100 },
+        "roleTitle": { "type": "string", "maxLength": 100 },
+        "areasOfFocus": { "type": "array" },
+        "specialties": { "type": "array" },
+        "deliveryMethods": { "type": "array" },
+        "languages": { "type": "array" },
+        "shortBio": { "type": "string", "maxLength": 1000 },
+        "isAcceptingNewClients": { "type": "boolean" },
+        "availableDays": { "type": "array" }
+      },
+      "required": ["userId", "name", "credentials", "roleTitle", "isAcceptingNewClients"]
+    },
+    "AdminContent": {
+      "title": "AdminContent",
+      "description": "CMS organization notices, emergency hotline, and clinic operating details",
+      "type": "object",
+      "properties": {
+        "announcementNotice": { "type": "string", "maxLength": 500 },
+        "heroHeadline": { "type": "string", "maxLength": 200 },
+        "heroSubtitle": { "type": "string", "maxLength": 500 },
+        "emergencyCrisisNotice": { "type": "string", "maxLength": 500 },
+        "officeHours": { "type": "string", "maxLength": 200 },
+        "phoneNumber": { "type": "string", "maxLength": 50 },
+        "faxNumber": { "type": "string", "maxLength": 50 },
+        "emailAddress": { "type": "string", "maxLength": 100 },
+        "officeAddress": { "type": "string", "maxLength": 255 },
+        "lastUpdated": { "type": "string" }
+      },
+      "required": ["heroHeadline", "emergencyCrisisNotice", "phoneNumber", "officeAddress"]
+    },
+    "ClientDocument": {
+      "title": "ClientDocument",
+      "description": "Encrypted client clinical document record in Firebase Storage",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "clientId": { "type": "string" },
+        "uploaderId": { "type": "string" },
+        "uploaderName": { "type": "string", "maxLength": 150 },
+        "uploaderRole": { "type": "string" },
+        "title": { "type": "string", "maxLength": 200 },
+        "fileName": { "type": "string", "maxLength": 255 },
+        "fileSize": { "type": "string", "maxLength": 50 },
+        "fileType": { "type": "string", "maxLength": 100 },
+        "storagePath": { "type": "string", "maxLength": 500 },
+        "category": { "type": "string", "enum": ["intake_consent", "insurance_id", "assessment", "care_plan", "referral", "general"] },
+        "isSharedWithClient": { "type": "boolean" },
+        "uploadedAt": { "type": "string" }
+      },
+      "required": ["clientId", "uploaderId", "title", "fileName", "storagePath", "category"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "User" },
+      "description": "User profile documents keyed by Firebase Auth UID"
+    },
+    "/client_profiles/{userId}": {
+      "schema": { "$ref": "ClientProfile" },
+      "description": "Confidential client intake and contact profiles keyed by client Auth UID"
+    },
+    "/appointments/{appointmentId}": {
+      "schema": { "$ref": "Appointment" },
+      "description": "Counseling and therapy appointment bookings"
+    },
+    "/service_requests/{requestId}": {
+      "schema": { "$ref": "ServiceRequest" },
+      "description": "Community care coordination and assistance requests"
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "NotificationItem" },
+      "description": "Direct in-app notifications for authenticated users"
+    },
+    "/staff_availability/{providerId}": {
+      "schema": { "$ref": "StaffAvailability" },
+      "description": "Public clinician profiles, focus areas, and scheduling availability"
+    },
+    "/admin_content/{contentId}": {
+      "schema": { "$ref": "AdminContent" },
+      "description": "Organization CMS notices, emergency crisis resources, and operational details"
+    },
+    "/documents/{documentId}": {
+      "schema": { "$ref": "ClientDocument" },
+      "description": "Secure client clinical records and document upload metadata"
+    }
+  }
+}

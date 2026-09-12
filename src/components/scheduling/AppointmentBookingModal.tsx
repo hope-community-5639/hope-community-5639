@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { CalendarExport } from '../common/CalendarExport';
+import { saveFirebaseAppointment } from '../../lib/firebaseService';
 
 interface AppointmentBookingModalProps {
   isOpen: boolean;
@@ -136,6 +137,11 @@ export const AppointmentBookingModal: React.FC<AppointmentBookingModalProps> = (
         },
         activeUser
       );
+
+      // Persist to Cloud Firestore
+      saveFirebaseAppointment(newApt).catch((fsErr) => {
+        console.warn('Could not sync appointment to Firestore:', fsErr);
+      });
 
       setCreatedAppointment(newApt);
       setStep(3); // Success step

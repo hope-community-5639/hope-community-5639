@@ -29,6 +29,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('HopeDemo2026!');
   const [role, setRole] = useState<UserRole>('client');
   const [mfaCode, setMfaCode] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +42,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
 
     try {
       if (mode === 'login') {
-        const ok = await login(email);
+        const ok = await login(email, password);
         if (ok) {
           if (isMfaRequired) {
             setMode('mfa');
@@ -51,7 +52,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
           }
         }
       } else if (mode === 'register') {
-        await register(email, firstName, lastName, role, phone);
+        await register(email, password || 'HopeDemo2026!', firstName, lastName, role, phone);
         onClose();
         if (onSuccess) onSuccess();
       } else if (mode === 'mfa') {

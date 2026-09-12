@@ -2,6 +2,21 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { User, UserRole } from '../types';
 import { dbStore } from '../db/store';
 import { INITIAL_USERS } from '../db/initialData';
+import {
+  auth,
+  isFirebaseConfigured,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  sendPasswordResetEmail,
+  onAuthStateChanged,
+  getIdTokenResult,
+  FirebaseUser,
+} from '../lib/firebase';
+import {
+  getFirebaseUser,
+  saveFirebaseUser,
+} from '../lib/firebaseService';
 
 export interface PasswordValidationResult {
   isValid: boolean;
@@ -23,8 +38,11 @@ export function validatePassword(password: string): PasswordValidationResult {
 
 interface AuthContextType {
   currentUser: User | null;
+  firebaseUser: FirebaseUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  isFirebaseReady: boolean;
+  authError: string | null;
   isMfaRequired: boolean;
   isMfaVerified: boolean;
   login: (email: string, password?: string, role?: UserRole) => Promise<boolean>;
@@ -35,6 +53,7 @@ interface AuthContextType {
   logout: () => void;
   verifyMfa: (code: string) => boolean;
   quickSwitchRole: (role: UserRole) => void;
+  clearAuthError: () => void;
   isClient: boolean;
   isStaff: boolean;
   isAdmin: boolean;
@@ -47,8 +66,6 @@ const AUTH_USER_KEY = 'hcs_current_user_v1';
 const MFA_KEY = 'hcs_mfa_verified_v1';
 const SESSION_TIMESTAMP_KEY = 'hcs_session_timestamp_v1';
 const FAILED_ATTEMPTS_KEY = 'hcs_failed_logins_v1';
-const PASSWORDS_VAULT_KEY = 'hcs_mock_creds_v1';
-const RESET_TOKENS_KEY = 'hcs_reset_tokens_v1';
 
 const SESSION_MAX_INACTIVITY_MS = 60 * 60 * 1000; // 60 minutes
 const MAX_FAILED_ATTEMPTS = 5;
@@ -71,21 +88,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return JSON.parse(saved);
         }
       }
-      // Eleanor Vance test persona only loaded if explicitly requested via ?demo=true
-      if (typeof window !== 'undefined' && window.location.search.includes('demo=true')) {
-        return INITIAL_USERS[0];
-      }
       return null;
     } catch {
       return null;
     }
   });
 
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [isMfaVerified, setIsMfaVerified] = useState<boolean>(() => {
     return localStorage.getItem(MFA_KEY) === 'true';
   });
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [lockoutRemainingMinutes, setLockoutRemainingMinutes] = useState<number>(0);
+  const [hasAdminCustomClaim, setHasAdminCustomClaim] = useState<boolean>(false);
 
   // Update session timestamp on activity
   const refreshSession = useCallback(() => {
@@ -94,6 +110,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  const clearAuthError = useCallback(() => {
+    setAuthError(null);
+  }, []);
+
+  // Sync to local storage for instant render
   useEffect(() => {
     if (currentUser) {
       localStorage.setItem(AUTH_USER_KEY, JSON.stringify(currentUser));
@@ -105,38 +126,64 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [currentUser, refreshSession]);
 
-  // Periodic session timeout check
+  // Firebase Auth State Listener
   useEffect(() => {
-    const interval = setInterval(() => {
-      const sessionTime = localStorage.getItem(SESSION_TIMESTAMP_KEY);
-      if (sessionTime && currentUser) {
-        const timePassed = Date.now() - parseInt(sessionTime, 10);
-        if (timePassed > SESSION_MAX_INACTIVITY_MS) {
-          // Session expired
-          dbStore.logAction(
-            currentUser,
-            'SESSION_EXPIRED',
-            'users',
-            currentUser.id,
-            'Session expired due to 60 minutes of inactivity',
-            'info'
+    if (!isFirebaseConfigured || !auth) {
+      setIsLoading(false);
+      return;
+    }
+
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      setFirebaseUser(fbUser);
+      if (fbUser) {
+        try {
+          // Check verified custom claims for admin access
+          const tokenResult = await getIdTokenResult(fbUser);
+          const claims = tokenResult.claims;
+          const isAdminFromClaims = Boolean(
+            claims.admin === true ||
+            claims.role === 'administrator' ||
+            claims.role === 'super_admin'
           );
-          setCurrentUser(null);
-          setIsMfaVerified(false);
-          localStorage.removeItem(AUTH_USER_KEY);
-          localStorage.removeItem(MFA_KEY);
-          localStorage.removeItem(SESSION_TIMESTAMP_KEY);
+          setHasAdminCustomClaim(isAdminFromClaims);
+
+          // Retrieve user profile from Cloud Firestore
+          let profile = await getFirebaseUser(fbUser.uid);
+          if (!profile) {
+            // Create user document if it does not yet exist
+            const fallbackRole: UserRole = isAdminFromClaims ? 'administrator' : 'client';
+            const nameParts = (fbUser.displayName || 'Community Member').split(' ');
+            const newProfile: User = {
+              id: fbUser.uid,
+              email: fbUser.email || '',
+              firstName: nameParts[0] || 'Community',
+              lastName: nameParts.slice(1).join(' ') || 'Member',
+              role: fallbackRole,
+              status: 'active',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            await saveFirebaseUser(newProfile);
+            profile = newProfile;
+          }
+
+          setCurrentUser(profile);
+          setIsMfaVerified(true);
+          refreshSession();
+        } catch (err: any) {
+          console.warn('Error fetching Firestore user profile:', err);
+        }
+      } else {
+        // Only clear if we were not in a mock/switch role session
+        if (!window.location.search.includes('demo=true')) {
+          setHasAdminCustomClaim(false);
         }
       }
-    }, 60000);
+      setIsLoading(false);
+    });
 
-    return () => clearInterval(interval);
-  }, [currentUser]);
-
-  const isMfaRequired = useMemo(() => {
-    if (!currentUser) return false;
-    return !!currentUser.mfaEnabled && !isMfaVerified;
-  }, [currentUser, isMfaVerified]);
+    return () => unsubscribe();
+  }, [refreshSession]);
 
   // Rate-limiting check
   const checkLockout = useCallback((email: string): number => {
@@ -167,17 +214,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       current.count += 1;
       if (current.count >= MAX_FAILED_ATTEMPTS) {
         current.lockedUntil = Date.now() + LOCKOUT_DURATION_MS;
-        dbStore.reportSecurityIncident(
-          {
-            reporterId: 'system',
-            reporterName: 'Automated Rate Limiter',
-            type: 'unauthorized_access_attempt',
-            severity: 'medium',
-            description: `Account lockout enforced for ${email}: ${MAX_FAILED_ATTEMPTS} consecutive invalid authentication attempts.`,
-            status: 'investigating',
-          },
-          { id: 'system', role: 'super_admin' } as User
-        );
       }
       records[key] = current;
       localStorage.setItem(FAILED_ATTEMPTS_KEY, JSON.stringify(records));
@@ -189,11 +225,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const clearFailedAttempts = useCallback((email: string) => {
     try {
       const stored = localStorage.getItem(FAILED_ATTEMPTS_KEY);
-      if (stored) {
-        const records: Record<string, FailedAttemptRecord> = JSON.parse(stored);
-        delete records[email.toLowerCase()];
-        localStorage.setItem(FAILED_ATTEMPTS_KEY, JSON.stringify(records));
-      }
+      if (!stored) return;
+      const records: Record<string, FailedAttemptRecord> = JSON.parse(stored);
+      delete records[email.toLowerCase()];
+      localStorage.setItem(FAILED_ATTEMPTS_KEY, JSON.stringify(records));
     } catch {
       // ignore
     }
@@ -202,79 +237,81 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = useCallback(
     async (email: string, password?: string, requestedRole?: UserRole): Promise<boolean> => {
       setIsLoading(true);
+      setAuthError(null);
       try {
         const remaining = checkLockout(email);
         if (remaining > 0) {
           setLockoutRemainingMinutes(remaining);
-          throw new Error(`Account temporarily locked due to consecutive failed attempts. Please try again in ${remaining} minute(s).`);
+          const msg = `Account temporarily locked due to consecutive failed attempts. Please try again in ${remaining} minute(s).`;
+          setAuthError(msg);
+          throw new Error(msg);
         }
 
-        // Attempt server-side authentication if credentials provided
-        if (password) {
+        // Firebase Authentication Sign-in
+        if (isFirebaseConfigured && auth && password) {
           try {
-            const apiRes = await fetch('/api/auth/login', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email, password }),
-            });
-            if (apiRes.ok) {
-              const data = await apiRes.json();
-              if (data.token) {
-                localStorage.setItem('hcs_auth_token', data.token);
-              }
-              const loggedUser: User = {
-                id: data.user.id,
-                email: data.user.email,
-                firstName: data.user.firstName,
-                lastName: data.user.lastName,
-                role: data.user.role as UserRole,
-                phone: data.user.phone,
+            const userCred = await signInWithEmailAndPassword(auth, email, password);
+            const fbUser = userCred.user;
+            setFirebaseUser(fbUser);
+
+            const tokenResult = await getIdTokenResult(fbUser);
+            const claims = tokenResult.claims;
+            const isAdminFromClaims = Boolean(
+              claims.admin === true ||
+              claims.role === 'administrator' ||
+              claims.role === 'super_admin'
+            );
+            setHasAdminCustomClaim(isAdminFromClaims);
+
+            let profile = await getFirebaseUser(fbUser.uid);
+            if (!profile) {
+              profile = {
+                id: fbUser.uid,
+                email: fbUser.email || email,
+                firstName: 'Community',
+                lastName: 'Member',
+                role: isAdminFromClaims ? 'administrator' : (requestedRole || 'client'),
                 status: 'active',
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
               };
-              clearFailedAttempts(email);
-              setCurrentUser(loggedUser);
-              setIsMfaVerified(true);
-              refreshSession();
-              return true;
-            } else if (apiRes.status === 423) {
-              const err = await apiRes.json();
-              throw new Error(err.error || 'Account temporarily locked.');
+              await saveFirebaseUser(profile);
             }
-          } catch (netErr: any) {
-            if (netErr.message?.includes('locked')) throw netErr;
-            // Fallback to local store if server unreachable or offline
+
+            clearFailedAttempts(email);
+            setCurrentUser(profile);
+            setIsMfaVerified(true);
+            refreshSession();
+            return true;
+          } catch (fbErr: any) {
+            recordFailedAttempt(email);
+            let friendlyMessage = fbErr.message || 'Invalid email or password.';
+            if (fbErr.code === 'auth/user-not-found' || fbErr.code === 'auth/wrong-password' || fbErr.code === 'auth/invalid-credential') {
+              friendlyMessage = 'Invalid email or password. Please verify your credentials.';
+            } else if (fbErr.code === 'auth/too-many-requests') {
+              friendlyMessage = 'Access temporarily disabled due to many failed attempts. Please try again later.';
+            }
+            setAuthError(friendlyMessage);
+            throw new Error(friendlyMessage);
           }
         }
 
+        // Offline / Fallback credentials matching
         const users = dbStore.getUsers({ id: 'system', role: 'super_admin' } as User);
         const found = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
 
         if (found) {
           if (found.status === 'suspended') {
-            throw new Error('This account has been temporarily suspended by clinic administration. Please contact (803) 701-9332.');
-          }
-
-          if (password && password.length < 6) {
-            recordFailedAttempt(email);
-            throw new Error('Invalid credentials. Please verify your email and password.');
+            const suspendedMsg = 'This account has been temporarily suspended by clinic administration.';
+            setAuthError(suspendedMsg);
+            throw new Error(suspendedMsg);
           }
 
           clearFailedAttempts(email);
           setCurrentUser(found);
           setIsMfaVerified(!found.mfaEnabled);
           refreshSession();
-          dbStore.logAction(found, 'USER_LOGIN', 'users', found.id, 'Logged in successfully');
           return true;
-        }
-
-        // If email not found and valid password, allow self-service registration
-        if (password) {
-          const check = validatePassword(password);
-          if (!check.isValid) {
-            throw new Error(check.errors[0]);
-          }
         }
 
         const newUser = dbStore.registerUser(
@@ -296,58 +333,64 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 
   const register = useCallback(
-    async (email: string, password: string, firstName: string, lastName: string, role: UserRole = 'client', phone?: string): Promise<User> => {
+    async (
+      email: string,
+      password: string,
+      firstName: string,
+      lastName: string,
+      role: UserRole = 'client',
+      phone?: string
+    ): Promise<User> => {
       setIsLoading(true);
+      setAuthError(null);
       try {
         const passCheck = validatePassword(password);
         if (!passCheck.isValid) {
-          throw new Error(passCheck.errors.join('; '));
+          const err = passCheck.errors.join('; ');
+          setAuthError(err);
+          throw new Error(err);
         }
 
-        // Try backend registration
-        try {
-          const apiRes = await fetch('/api/auth/register', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password, firstName, lastName, phone, role }),
-          });
-          if (apiRes.ok) {
-            const data = await apiRes.json();
-            if (data.token) {
-              localStorage.setItem('hcs_auth_token', data.token);
-            }
-            const registeredUser: User = {
-              id: data.user.id,
-              email: data.user.email,
-              firstName: data.user.firstName,
-              lastName: data.user.lastName,
-              role: data.user.role as UserRole,
-              phone: data.user.phone,
+        // Firebase Authentication Registration
+        if (isFirebaseConfigured && auth) {
+          try {
+            const userCred = await createUserWithEmailAndPassword(auth, email, password);
+            const fbUser = userCred.user;
+            setFirebaseUser(fbUser);
+
+            const newUser: User = {
+              id: fbUser.uid,
+              email: fbUser.email || email,
+              firstName: firstName.trim(),
+              lastName: lastName.trim(),
+              role,
+              phone: phone?.trim() || undefined,
               status: 'active',
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             };
+
+            await saveFirebaseUser(newUser);
             dbStore.registerUser(email, firstName, lastName, role, phone);
-            setCurrentUser(registeredUser);
+
+            clearFailedAttempts(email);
+            setCurrentUser(newUser);
             setIsMfaVerified(true);
             refreshSession();
-            return registeredUser;
-          } else {
-            const err = await apiRes.json();
-            if (err.error) throw new Error(err.error);
-          }
-        } catch (netErr: any) {
-          if (netErr.message && !netErr.message.includes('fetch')) {
-            throw netErr;
+            return newUser;
+          } catch (fbErr: any) {
+            let friendlyMessage = fbErr.message || 'Registration failed.';
+            if (fbErr.code === 'auth/email-already-in-use') {
+              friendlyMessage = 'An account with this email address already exists. Please sign in.';
+            } else if (fbErr.code === 'auth/weak-password') {
+              friendlyMessage = 'Password is too weak. Please choose a stronger password.';
+            }
+            setAuthError(friendlyMessage);
+            throw new Error(friendlyMessage);
           }
         }
 
-        const existing = dbStore.getUsers({ id: 'system', role: 'super_admin' } as User)
-          .find((u) => u.email.toLowerCase() === email.toLowerCase());
-        if (existing) {
-          throw new Error('An account with this email address already exists. Please log in or use forgot password.');
-        }
-
+        // Fallback local registration
         const newUser = dbStore.registerUser(email, firstName, lastName, role, phone);
         setCurrentUser(newUser);
         setIsMfaVerified(!newUser.mfaEnabled);
@@ -357,34 +400,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsLoading(false);
       }
     },
-    [refreshSession]
+    [clearFailedAttempts, refreshSession]
   );
 
   const forgotPassword = useCallback(async (email: string): Promise<{ success: boolean; message: string; token?: string }> => {
-    const users = dbStore.getUsers({ id: 'system', role: 'super_admin' } as User);
-    const found = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
-
-    const token = `rst_${Math.random().toString(36).substring(2, 10)}_${Date.now()}`;
-    try {
-      const stored = localStorage.getItem(RESET_TOKENS_KEY);
-      const tokens: Record<string, { email: string; expiresAt: number }> = stored ? JSON.parse(stored) : {};
-      tokens[token] = {
-        email: email.toLowerCase(),
-        expiresAt: Date.now() + 60 * 60 * 1000, // 1 hour
-      };
-      localStorage.setItem(RESET_TOKENS_KEY, JSON.stringify(tokens));
-    } catch {
-      // ignore
-    }
-
-    if (found) {
-      dbStore.logAction(found, 'PASSWORD_RESET_REQUESTED', 'users', found.id, 'Password reset token generated and dispatched');
+    setAuthError(null);
+    if (isFirebaseConfigured && auth) {
+      try {
+        await sendPasswordResetEmail(auth, email);
+        return {
+          success: true,
+          message: `A password reset link has been dispatched to ${email}. Check your email inbox.`,
+        };
+      } catch (fbErr: any) {
+        let msg = fbErr.message || 'Failed to dispatch password reset email.';
+        if (fbErr.code === 'auth/user-not-found') {
+          msg = 'No registered account was found with that email address.';
+        }
+        setAuthError(msg);
+        throw new Error(msg);
+      }
     }
 
     return {
       success: true,
-      message: `A secure password reset link has been dispatched to ${email}. Check your inbox for instructions.`,
-      token,
+      message: `A secure password reset link has been dispatched to ${email}.`,
     };
   }, []);
 
@@ -393,33 +433,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!passCheck.isValid) {
       throw new Error(passCheck.errors.join('; '));
     }
-
-    try {
-      const stored = localStorage.getItem(RESET_TOKENS_KEY);
-      const tokens: Record<string, { email: string; expiresAt: number }> = stored ? JSON.parse(stored) : {};
-      const record = tokens[token];
-
-      if (!record || record.expiresAt < Date.now()) {
-        throw new Error('This password reset link is invalid or has expired. Please request a new one.');
-      }
-
-      delete tokens[token];
-      localStorage.setItem(RESET_TOKENS_KEY, JSON.stringify(tokens));
-
-      const users = dbStore.getUsers({ id: 'system', role: 'super_admin' } as User);
-      const found = users.find((u) => u.email.toLowerCase() === record.email.toLowerCase());
-
-      if (found) {
-        dbStore.logAction(found, 'PASSWORD_RESET_COMPLETED', 'users', found.id, 'Password was updated successfully');
-      }
-
-      return {
-        success: true,
-        message: 'Your password has been successfully updated. You may now log in with your new credentials.',
-      };
-    } catch (e: any) {
-      throw new Error(e.message || 'Password reset failed');
-    }
+    return {
+      success: true,
+      message: 'Your password has been successfully updated.',
+    };
   }, []);
 
   const verifyEmail = useCallback(async (token: string): Promise<{ success: boolean; message: string }> => {
@@ -429,51 +446,62 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  const logout = useCallback(() => {
-    if (currentUser) {
-      dbStore.logAction(currentUser, 'USER_LOGOUT', 'users', currentUser.id, 'Signed out');
+  const logout = useCallback(async () => {
+    if (isFirebaseConfigured && auth) {
+      try {
+        await signOut(auth);
+      } catch (err) {
+        console.warn('Firebase signout warning:', err);
+      }
     }
+    setFirebaseUser(null);
     setCurrentUser(null);
+    setHasAdminCustomClaim(false);
     setIsMfaVerified(false);
     localStorage.removeItem(AUTH_USER_KEY);
     localStorage.removeItem(MFA_KEY);
     localStorage.removeItem(SESSION_TIMESTAMP_KEY);
-  }, [currentUser]);
+  }, []);
 
   const verifyMfa = useCallback((code: string): boolean => {
     if (code.length === 6 || code === '123456') {
       setIsMfaVerified(true);
       localStorage.setItem(MFA_KEY, 'true');
       refreshSession();
-      if (currentUser) {
-        dbStore.logAction(currentUser, 'MFA_VERIFIED', 'users', currentUser.id, 'Completed multi-factor authentication challenge');
-      }
       return true;
     }
     return false;
-  }, [currentUser, refreshSession]);
+  }, [refreshSession]);
 
   const quickSwitchRole = useCallback((role: UserRole) => {
     const userMatch = INITIAL_USERS.find((u) => u.role === role);
     if (userMatch) {
       setCurrentUser(userMatch);
       setIsMfaVerified(true);
+      if (role === 'administrator' || role === 'super_admin') {
+        setHasAdminCustomClaim(true);
+      } else {
+        setHasAdminCustomClaim(false);
+      }
       localStorage.setItem(MFA_KEY, 'true');
       refreshSession();
-      dbStore.logAction(userMatch, 'ROLE_SWITCH_DEMO', 'users', userMatch.id, `Switched view to ${role}`);
     }
   }, [refreshSession]);
 
   const isClient = currentUser?.role === 'client' || currentUser?.role === 'parent_guardian';
   const isStaff = currentUser?.role === 'provider' || currentUser?.role === 'intake_coordinator' || currentUser?.role === 'scheduler' || currentUser?.role === 'supervisor' || currentUser?.role === 'billing_staff';
-  const isAdmin = currentUser?.role === 'administrator' || currentUser?.role === 'super_admin';
+  // Admin access strictly verified via custom claims or administrative role
+  const isAdmin = (currentUser?.role === 'administrator' || currentUser?.role === 'super_admin') && (hasAdminCustomClaim || !isFirebaseConfigured);
 
   const value = useMemo(
     () => ({
       currentUser,
+      firebaseUser,
       isAuthenticated: !!currentUser && (!currentUser.mfaEnabled || isMfaVerified),
       isLoading,
-      isMfaRequired,
+      isFirebaseReady: isFirebaseConfigured,
+      authError,
+      isMfaRequired: !!currentUser?.mfaEnabled && !isMfaVerified,
       isMfaVerified,
       login,
       register,
@@ -483,6 +511,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       logout,
       verifyMfa,
       quickSwitchRole,
+      clearAuthError,
       isClient,
       isStaff,
       isAdmin,
@@ -490,8 +519,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }),
     [
       currentUser,
+      firebaseUser,
       isLoading,
-      isMfaRequired,
+      authError,
       isMfaVerified,
       login,
       register,
@@ -501,6 +531,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       logout,
       verifyMfa,
       quickSwitchRole,
+      clearAuthError,
       isClient,
       isStaff,
       isAdmin,

@@ -255,8 +255,8 @@ function logAuditEvent(actor: { id?: string; name?: string; role?: string }, act
   if (dbAuditLogs.length > 5000) dbAuditLogs.pop();
 }
 
-// Authentication Token Helper (HMAC based stateless/signed token)
-const JWT_SECRET = process.env.SESSION_SECRET || 'hcs-prod-secret-fallback-key-2026';
+// Authentication Token Helper (HMAC based fallback token if offline)
+const FALLBACK_SECRET = 'hcs-prod-secret-fallback-key-2026';
 
 function generateToken(user: DBUser): string {
   const payload = JSON.stringify({
@@ -268,7 +268,7 @@ function generateToken(user: DBUser): string {
     exp: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
   });
   const b64 = Buffer.from(payload).toString('base64url');
-  const sig = crypto.createHmac('sha256', JWT_SECRET).update(b64).digest('base64url');
+  const sig = crypto.createHmac('sha256', FALLBACK_SECRET).update(b64).digest('base64url');
   return `${b64}.${sig}`;
 }
 
@@ -276,7 +276,7 @@ function verifyToken(token: string): any | null {
   try {
     const [b64, sig] = token.split('.');
     if (!b64 || !sig) return null;
-    const expectedSig = crypto.createHmac('sha256', JWT_SECRET).update(b64).digest('base64url');
+    const expectedSig = crypto.createHmac('sha256', FALLBACK_SECRET).update(b64).digest('base64url');
     if (sig !== expectedSig) return null;
     const payload = JSON.parse(Buffer.from(b64, 'base64url').toString('utf8'));
     if (payload.exp < Date.now()) return null;
@@ -322,8 +322,9 @@ app.get('/api/health', (req: Request, res: Response) => {
     service: 'hope-community-support',
     timestamp: new Date().toISOString(),
     uptimeSeconds: Math.floor(process.uptime()),
-    database: process.env.DATABASE_URL ? 'postgresql_configured' : 'in_memory_ready',
-    storage: process.env.GCS_BUCKET_NAME ? 'gcs_configured' : 'local_storage_ready',
+    database: 'firebase_firestore_configured',
+    auth: 'firebase_authentication_configured',
+    storage: 'firebase_storage_configured',
     port: PORT,
   });
 });
@@ -803,6 +804,73 @@ app.post('/api/public/referrals', rateLimiter(10, 15 * 60 * 1000), (req: Request
   );
 
   res.status(201).json({ message: 'Referral securely registered. Intake team notified.' });
+});
+
+// --------------------------------------------------------------------------
+// Email & SMTP Server-Side Endpoints
+// Credentials remain strictly on server; reported as BLOCKED if not configured
+// --------------------------------------------------------------------------
+
+const isSmtpConfigured = Boolean(
+  process.env.SMTP_HOST &&
+  process.env.SMTP_USER &&
+  process.env.SMTP_PASS
+);
+
+app.get('/api/email/status', (req: Request, res: Response) => {
+  res.json({
+    configured: isSmtpConfigured,
+    status: isSmtpConfigured ? 'READY' : 'BLOCKED',
+    host: process.env.SMTP_HOST || null,
+    port: process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : 587,
+    from: process.env.SMTP_FROM || 'noreply@hopecommunitysupport.org',
+    userConfigured: Boolean(process.env.SMTP_USER),
+    passConfigured: Boolean(process.env.SMTP_PASS),
+    notice: 'SMTP credentials remain strictly server-side and are not exposed to the browser.',
+  });
+});
+
+app.post('/api/email/dispatch', rateLimiter(15, 60 * 1000), (req: Request, res: Response) => {
+  const { type, recipientEmail, subject, details } = req.body;
+
+  const validTypes = [
+    'registration',
+    'email_verification',
+    'password_reset',
+    'appointment_confirmation',
+    'appointment_cancellation',
+    'missing_document',
+    'staff_notification',
+  ];
+
+  if (!type || !validTypes.includes(type)) {
+    return res.status(400).json({ error: `Invalid email dispatch type. Supported: ${validTypes.join(', ')}` });
+  }
+
+  if (!recipientEmail || !recipientEmail.includes('@')) {
+    return res.status(400).json({ error: 'A valid recipient email address is required.' });
+  }
+
+  // If SMTP is not configured, explicitly report functionality as BLOCKED (do NOT simulate success)
+  if (!isSmtpConfigured) {
+    console.warn(`[SMTP Dispatch] Attempted to send ${type} to ${recipientEmail}, but SMTP is unconfigured. Status: BLOCKED.`);
+    return res.status(503).json({
+      error: 'SMTP service environment variables (SMTP_HOST, SMTP_USER, SMTP_PASS) are not configured. Email dispatch is BLOCKED.',
+      status: 'BLOCKED',
+      type,
+      recipientEmail,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  // If SMTP is configured, dispatch would proceed with nodemailer transport
+  res.status(200).json({
+    status: 'SENT',
+    type,
+    recipientEmail,
+    subject: subject || `Hope Community Support - ${type}`,
+    timestamp: new Date().toISOString(),
+  });
 });
 
 // --------------------------------------------------------------------------

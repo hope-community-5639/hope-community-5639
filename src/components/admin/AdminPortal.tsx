@@ -209,7 +209,7 @@ export const AdminPortal: React.FC = () => {
             <div className="bg-white rounded-xl border border-[#A9C2B2]/40 p-5 shadow-xs">
               <span className="text-xs font-semibold text-[#66736F] block">Licensed Staff / Providers</span>
               <div className="text-2xl font-serif font-bold text-[#173F3A] mt-1">
-                {users.filter((u) => u.role.startsWith('staff') || u.role === 'admin').length}
+                {users.filter((u) => u.role !== 'client' && u.role !== 'parent_guardian').length}
               </div>
               <span className="text-[11px] text-[#216761]">100% MFA Enforced</span>
             </div>
@@ -686,8 +686,8 @@ export const AdminPortal: React.FC = () => {
               <label className="block font-semibold text-[#173F3A] mb-1">Physical Office Address</label>
               <input
                 type="text"
-                value={settings.address}
-                onChange={(e) => setSettings({ ...settings, address: e.target.value })}
+                value={settings.address || settings.primaryAddress || ''}
+                onChange={(e) => setSettings({ ...settings, primaryAddress: e.target.value, address: e.target.value })}
                 className="w-full px-3 py-2 bg-[#F8F5EE] rounded-lg border border-[#A9C2B2]/60 focus:outline-none"
               />
             </div>
@@ -696,7 +696,7 @@ export const AdminPortal: React.FC = () => {
               <label className="block font-semibold text-[#173F3A] mb-1">Office Hours Description</label>
               <input
                 type="text"
-                value={settings.officeHours}
+                value={settings.officeHours || ''}
                 onChange={(e) => setSettings({ ...settings, officeHours: e.target.value })}
                 className="w-full px-3 py-2 bg-[#F8F5EE] rounded-lg border border-[#A9C2B2]/60 focus:outline-none"
               />
@@ -706,7 +706,7 @@ export const AdminPortal: React.FC = () => {
               <label className="block font-semibold text-[#173F3A] mb-1">Crisis & Emergency Notice Text</label>
               <textarea
                 rows={2}
-                value={settings.emergencyNotice}
+                value={settings.emergencyNotice || ''}
                 onChange={(e) => setSettings({ ...settings, emergencyNotice: e.target.value })}
                 className="w-full px-3 py-2 bg-[#F8F5EE] rounded-lg border border-[#A9C2B2]/60 focus:outline-none"
               />
@@ -986,7 +986,7 @@ export const AdminPortal: React.FC = () => {
               <p><strong>Email:</strong> {selectedInquiry.email}</p>
               <p><strong>Phone:</strong> {selectedInquiry.phone || 'Not provided'}</p>
               <p><strong>Subject:</strong> {selectedInquiry.subject}</p>
-              <p><strong>Preferred Contact Method:</strong> <span className="capitalize">{selectedInquiry.preferredContactMethod}</span></p>
+              <p><strong>Preferred Contact Method:</strong> <span className="capitalize">{selectedInquiry.preferredContact || selectedInquiry.preferredContactMethod || 'email'}</span></p>
               <p><strong>Received:</strong> {new Date(selectedInquiry.createdAt).toLocaleString()}</p>
             </div>
 

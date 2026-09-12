@@ -1,0 +1,143 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default-deny global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Admin access strictly uses verified Firebase custom claims
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.admin == true ||
+        (request.auth.token.role != null && request.auth.token.role in ['administrator', 'super_admin'])
+      );
+    }
+
+    function isStaff() {
+      return isSignedIn() && (
+        isAdmin() ||
+        (request.auth.token.role != null && request.auth.token.role in ['provider', 'intake_coordinator', 'scheduler', 'supervisor', 'billing_staff'])
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // 1. Users collection
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isStaff();
+      allow list: if isAdmin();
+      allow create: if isOwner(userId) && (
+        !('role' in request.resource.data) ||
+        request.resource.data.role in ['client', 'parent_guardian'] ||
+        isAdmin()
+      );
+      // Users cannot elevate their own role to administrator
+      allow update: if isAdmin() || (
+        isOwner(userId) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']))
+      );
+      allow delete: if isAdmin();
+    }
+
+    // 2. Client Profiles
+    match /client_profiles/{userId} {
+      allow get: if isOwner(userId) || isStaff();
+      allow list: if isStaff();
+      allow create, update: if isOwner(userId) || isStaff();
+      allow delete: if isAdmin();
+    }
+
+    // 3. Appointments
+    match /appointments/{appointmentId} {
+      allow get: if isSignedIn() && (resource.data.clientId == request.auth.uid || isStaff());
+      allow list: if isSignedIn() && (
+        isStaff() ||
+        resource.data.clientId == request.auth.uid
+      );
+      allow create: if isSignedIn() && (
+        request.resource.data.clientId == request.auth.uid ||
+        isStaff()
+      );
+      allow update: if isSignedIn() && (
+        isStaff() ||
+        (resource.data.clientId == request.auth.uid && request.resource.data.clientId == request.auth.uid)
+      );
+      allow delete: if isAdmin();
+    }
+
+    // 4. Service Requests
+    match /service_requests/{requestId} {
+      allow get: if isSignedIn() && (resource.data.clientId == request.auth.uid || isStaff());
+      allow list: if isSignedIn() && (
+        isStaff() ||
+        resource.data.clientId == request.auth.uid
+      );
+      allow create: if isSignedIn() && (
+        request.resource.data.clientId == request.auth.uid ||
+        isStaff()
+      );
+      allow update: if isSignedIn() && (
+        isStaff() ||
+        (resource.data.clientId == request.auth.uid && request.resource.data.clientId == request.auth.uid)
+      );
+      allow delete: if isAdmin();
+    }
+
+    // 5. Notifications
+    match /notifications/{notificationId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isStaff());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isStaff());
+      allow create: if isStaff();
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+      allow delete: if isStaff();
+    }
+
+    // 6. Staff Availability (Clinician Directory)
+    match /staff_availability/{providerId} {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+
+    // 7. Admin CMS Content (Emergency info, announcements, clinic details)
+    match /admin_content/{contentId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Connectivity test verification doc
+    match /test/{docId} {
+      allow read: if true;
+    }
+
+    // 8. Secure Documents & Clinical Uploads Metadata
+    match /documents/{documentId} {
+      allow get: if isSignedIn() && (
+        isStaff() ||
+        (resource.data.clientId == request.auth.uid && resource.data.isSharedWithClient == true)
+      );
+      allow list: if isSignedIn() && (
+        isStaff() ||
+        (resource.data.clientId == request.auth.uid && resource.data.isSharedWithClient == true)
+      );
+      allow create: if isSignedIn() && (
+        request.resource.data.clientId == request.auth.uid ||
+        isStaff()
+      );
+      allow update, delete: if isStaff();
+    }
+  }
+}

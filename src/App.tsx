@@ -22,13 +22,23 @@ import { AppointmentBookingModal } from './components/scheduling/AppointmentBook
 import { AuthModal } from './components/auth/AuthModal';
 
 const MainAppContent: React.FC = () => {
-  const { currentUser, isClient, isStaff, isAdmin } = useAuth();
+  const { currentUser, isClient, isStaff, isAdmin, isLoading, isFirebaseReady, authError, clearAuthError } = useAuth();
 
   const [currentView, setCurrentView] = useState<string>('home');
   const [selectedServiceSlug, setSelectedServiceSlug] = useState<string>('individual-counseling');
   const [isBookingOpen, setIsBookingOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [legalPage, setLegalPage] = useState<'privacy' | 'hipaa' | 'terms' | 'accessibility' | 'nondiscrimination'>('privacy');
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#F8F5EE] text-[#173F3A]">
+        <div className="w-10 h-10 rounded-full border-3 border-[#216761]/20 border-t-[#216761] animate-spin mb-4" />
+        <p className="font-serif text-lg text-[#173F3A] font-semibold tracking-tight">Hope Community Support</p>
+        <p className="text-xs text-[#66736F] mt-1">Initializing secure session...</p>
+      </div>
+    );
+  }
 
   const handleNavigate = (view: string) => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -73,15 +83,31 @@ const MainAppContent: React.FC = () => {
         onSwitchRole={(role) => {
           if (role === 'client' || role === 'parent_guardian') {
             setCurrentView('client_portal');
-          } else if (role === 'staff_provider' || role === 'staff_intake') {
+          } else if (role === 'provider' || role === 'intake_coordinator' || role === 'supervisor' || role === 'scheduler' || role === 'billing_staff') {
             setCurrentView('staff_portal');
-          } else if (role === 'admin') {
+          } else if (role === 'administrator' || role === 'super_admin') {
             setCurrentView('admin_portal');
           } else {
             setCurrentView('home');
           }
         }}
       />
+
+      {/* Non-blocking Authentication Alert Banner */}
+      {authError && (
+        <div className="bg-[#B3392F]/10 border-b border-[#B3392F]/20 px-4 py-2 text-xs text-[#B3392F] flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold">Notice:</span>
+            <span>{authError}</span>
+          </div>
+          <button
+            onClick={clearAuthError}
+            className="text-xs underline hover:text-[#8C2C24] font-medium"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Main Header & Navigation */}
       <Navbar
@@ -95,13 +121,24 @@ const MainAppContent: React.FC = () => {
       <main className="flex-1">
         {currentView === 'home' && (
           <HomePage
-            onNavigate={handleNavigate}
+            onNavigate={(v) => {
+              if (v.startsWith('service:')) {
+                handleServiceSelect(v.replace('service:', ''));
+              } else {
+                handleNavigate(v);
+              }
+            }}
             onOpenBooking={() => setIsBookingOpen(true)}
-            onSelectService={handleServiceSelect}
+            onOpenAuth={() => setIsAuthOpen(true)}
           />
         )}
 
-        {currentView === 'about' && <AboutPage onNavigate={handleNavigate} />}
+        {currentView === 'about' && (
+          <AboutPage
+            onNavigate={handleNavigate}
+            onOpenBooking={() => setIsBookingOpen(true)}
+          />
+        )}
 
         {(currentView === 'services' || currentView === 'services_overview') && (
           <ServicesOverviewPage
@@ -112,42 +149,37 @@ const MainAppContent: React.FC = () => {
 
         {currentView === 'service_detail' && (
           <ServiceDetailPage
-            serviceSlug={selectedServiceSlug}
-            onNavigate={handleNavigate}
+            category={(selectedServiceSlug as any) || 'therapy'}
+            onBack={() => handleNavigate('services_overview')}
             onOpenBooking={() => setIsBookingOpen(true)}
           />
         )}
 
         {currentView === 'process' && (
           <ProcessPage
-            onNavigate={handleNavigate}
             onOpenBooking={() => setIsBookingOpen(true)}
+            onOpenAuth={() => setIsAuthOpen(true)}
           />
         )}
 
         {currentView === 'team' && (
           <TeamPage
-            onNavigate={handleNavigate}
             onOpenBooking={() => setIsBookingOpen(true)}
           />
         )}
 
         {currentView === 'locations' && (
           <LocationsPage
-            onNavigate={handleNavigate}
             onOpenBooking={() => setIsBookingOpen(true)}
           />
         )}
 
         {currentView === 'resources' && (
-          <ResourcesPage
-            onNavigate={handleNavigate}
-            onOpenBooking={() => setIsBookingOpen(true)}
-          />
+          <ResourcesPage />
         )}
 
         {currentView === 'careers' && (
-          <CareersPage onNavigate={handleNavigate} />
+          <CareersPage />
         )}
 
         {currentView === 'contact' && <ContactPage />}
@@ -185,7 +217,10 @@ const MainAppContent: React.FC = () => {
       />
 
       {/* Global Footer */}
-      <Footer onNavigate={handleNavigate} />
+      <Footer
+        onNavigate={handleNavigate}
+        onOpenBooking={() => setIsBookingOpen(true)}
+      />
     </div>
   );
 };
