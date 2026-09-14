@@ -29,11 +29,25 @@ import {
   X,
   Shield,
   Phone,
+  Activity,
+  Receipt,
+  HeartHandshake,
+  PhoneCall,
+  Sparkles,
 } from 'lucide-react';
 import { StatusBadge } from '../common/StatusBadge';
 import { CalendarExport } from '../common/CalendarExport';
 import { EmergencyBanner } from '../common/EmergencyBanner';
 import { ClientIntakeForm } from './ClientIntakeForm';
+import { ClientOnboardingWizard } from '../clinical/ClientOnboardingWizard';
+import { WellnessProgramView } from '../clinical/WellnessProgramView';
+import { ClientVideoSessionView } from './ClientVideoSessionView';
+import { ClientReportsView } from './ClientReportsView';
+import { ClientConsentsView } from './ClientConsentsView';
+import { ClientProgressCheckInsView } from './ClientProgressCheckInsView';
+import { ClientPrivacyRequestsView } from './ClientPrivacyRequestsView';
+import { ClientEmergencyHelpView } from './ClientEmergencyHelpView';
+import { clinicalStore } from '../../db/clinicalStore';
 import {
   fetchClientAppointments,
   fetchClientServiceRequests,
@@ -50,7 +64,23 @@ interface ClientDashboardProps {
 
 export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking }) => {
   const { currentUser } = useAuth();
-  const [activeTab, setActiveTab] = useState<'overview' | 'appointments' | 'intake' | 'requests' | 'messages' | 'documents' | 'care_plan'>('overview');
+  const [activeTab, setActiveTab] = useState<
+    | 'overview'
+    | 'onboarding'
+    | 'appointments'
+    | 'video_session'
+    | 'reports'
+    | 'wellness'
+    | 'checkins'
+    | 'consents'
+    | 'requests'
+    | 'messages'
+    | 'documents'
+    | 'care_plan'
+    | 'billing'
+    | 'privacy'
+    | 'emergency_help'
+  >('overview');
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [intakes, setIntakes] = useState<IntakeSubmission[]>([]);
@@ -58,6 +88,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string>('');
   const [messages, setMessages] = useState<SecureMessage[]>([]);
+  const [clientInvoices, setClientInvoices] = useState(() => clinicalStore.getInvoices(currentUser));
   const [newMessageText, setNewMessageText] = useState('');
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
   const [carePlans, setCarePlans] = useState<CarePlan[]>([]);
@@ -83,58 +114,65 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
 
   const loadData = () => {
     if (!currentUser) return;
-    setAppointments(dbStore.getAppointments(currentUser) || []);
-    setIntakes(dbStore.getIntakes(currentUser) || []);
-    setServiceRequests(dbStore.getServiceRequests(currentUser) || []);
-    const convs = dbStore.getConversations(currentUser) || [];
-    setConversations(convs);
-    if (convs.length > 0 && !selectedConversationId) {
-      setSelectedConversationId(convs[0].id);
+    try {
+      setAppointments(dbStore.getAppointments(currentUser) || []);
+      setIntakes(dbStore.getIntakes(currentUser) || []);
+      setServiceRequests(dbStore.getServiceRequests(currentUser) || []);
+      const convs = dbStore.getConversations(currentUser) || [];
+      setConversations(convs);
+      if (convs && convs.length > 0) {
+        setSelectedConversationId((prev) => {
+          if (prev && convs.some((c) => c && c.id === prev)) return prev;
+          return convs[0].id;
+        });
+      }
+      setDocuments(dbStore.getDocuments(currentUser) || []);
+      setCarePlans(dbStore.getCarePlans(currentUser) || []);
+      setNotifications(dbStore.getNotifications(currentUser.id) || []);
+    } catch (err) {
+      console.warn('Error loading dashboard local data:', err);
     }
-    setDocuments(dbStore.getDocuments(currentUser) || []);
-    setCarePlans(dbStore.getCarePlans(currentUser) || []);
-    setNotifications(dbStore.getNotifications(currentUser.id) || []);
 
     // Also sync directly from Cloud Firestore for client-isolated records
     fetchClientAppointments(currentUser.id).then((fsApts) => {
-      if (fsApts && fsApts.length > 0) {
+      if (fsApts && Array.isArray(fsApts) && fsApts.length > 0) {
         setAppointments((prev) => {
           const map = new Map<string, Appointment>();
-          prev.forEach((a) => map.set(a.id, a));
-          fsApts.forEach((a) => map.set(a.id, a));
+          (prev || []).forEach((a) => a && map.set(a.id, a));
+          fsApts.forEach((a) => a && map.set(a.id, a));
           return Array.from(map.values());
         });
       }
     }).catch(() => {});
 
     fetchClientServiceRequests(currentUser.id).then((fsReqs) => {
-      if (fsReqs && fsReqs.length > 0) {
+      if (fsReqs && Array.isArray(fsReqs) && fsReqs.length > 0) {
         setServiceRequests((prev) => {
           const map = new Map<string, ServiceRequest>();
-          prev.forEach((r) => map.set(r.id, r));
-          fsReqs.forEach((r) => map.set(r.id, r));
+          (prev || []).forEach((r) => r && map.set(r.id, r));
+          fsReqs.forEach((r) => r && map.set(r.id, r));
           return Array.from(map.values());
         });
       }
     }).catch(() => {});
 
     fetchClientDocuments(currentUser.id).then((fsDocs) => {
-      if (fsDocs && fsDocs.length > 0) {
+      if (fsDocs && Array.isArray(fsDocs) && fsDocs.length > 0) {
         setDocuments((prev) => {
           const map = new Map<string, ClientDocument>();
-          prev.forEach((d) => map.set(d.id, d));
-          fsDocs.forEach((d) => map.set(d.id, d));
+          (prev || []).forEach((d) => d && map.set(d.id, d));
+          fsDocs.forEach((d) => d && map.set(d.id, d));
           return Array.from(map.values());
         });
       }
     }).catch(() => {});
 
     fetchUserNotifications(currentUser.id).then((fsNotes) => {
-      if (fsNotes && fsNotes.length > 0) {
+      if (fsNotes && Array.isArray(fsNotes) && fsNotes.length > 0) {
         setNotifications((prev) => {
           const map = new Map<string, NotificationItem>();
-          prev.forEach((n) => map.set(n.id, n));
-          fsNotes.forEach((n) => map.set(n.id, n));
+          (prev || []).forEach((n) => n && map.set(n.id, n));
+          fsNotes.forEach((n) => n && map.set(n.id, n));
           return Array.from(map.values());
         });
       }
@@ -151,8 +189,16 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
 
   useEffect(() => {
     if (selectedConversationId && currentUser) {
-      setMessages(dbStore.getMessages(selectedConversationId, currentUser));
-      dbStore.markMessagesAsRead(selectedConversationId, currentUser);
+      try {
+        const msgs = dbStore.getMessages(selectedConversationId, currentUser) || [];
+        setMessages(msgs);
+        dbStore.markMessagesAsRead(selectedConversationId, currentUser);
+      } catch (err) {
+        console.warn('Error fetching messages:', err);
+        setMessages([]);
+      }
+    } else {
+      setMessages([]);
     }
   }, [selectedConversationId, currentUser]);
 
@@ -243,12 +289,12 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
     }
   };
 
-  const nextAppointment = appointments
-    .filter((a) => !['client_canceled', 'staff_canceled', 'completed'].includes(a.status))
-    .sort((a, b) => (a.date > b.date ? 1 : -1))[0];
+  const nextAppointment = (appointments || [])
+    .filter((a) => a && !['client_canceled', 'staff_canceled', 'completed'].includes(a.status))
+    .sort((a, b) => ((a.date || '') > (b.date || '') ? 1 : -1))[0];
 
-  const clientIntake = intakes[0];
-  const activeCarePlan = carePlans[0];
+  const clientIntake = (intakes || [])[0];
+  const activeCarePlan = (carePlans || [])[0];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
@@ -280,7 +326,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
             Request Appointment
           </button>
           <button
-            onClick={() => setActiveTab('intake')}
+            onClick={() => setActiveTab('onboarding')}
             className="px-4 py-2.5 rounded-lg bg-[#F8F5EE] border border-[#216761]/40 text-[#173F3A] text-xs font-semibold hover:bg-[#EFEAE0] transition-colors flex items-center gap-2"
           >
             <FileText className="w-4 h-4 text-[#216761]" />
@@ -293,17 +339,25 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
       <div className="border-b border-[#A9C2B2]/40 flex items-center gap-2 overflow-x-auto pb-px">
         {[
           { id: 'overview', label: 'Dashboard Overview' },
+          { id: 'onboarding', label: `Intake & Consents ${clientIntake?.status === 'approved' ? '✓' : '(!)'}` },
           { id: 'appointments', label: `Appointments (${appointments?.length || 0})` },
-          { id: 'intake', label: `Intake & Consents ${clientIntake?.status === 'approved' ? '✓' : '(!)'}` },
+          { id: 'video_session', label: 'Telehealth Room' },
+          { id: 'reports', label: 'Formal Reports' },
+          { id: 'wellness', label: 'Wellness Program' },
+          { id: 'checkins', label: 'Weekly Check-ins' },
+          { id: 'consents', label: 'Consent Center' },
+          { id: 'billing', label: `Billing & Invoices (${clientInvoices.length})` },
           { id: 'requests', label: `Service Requests (${serviceRequests?.length || 0})` },
-          { id: 'messages', label: `Secure Messages (${messages?.length || 0})` },
+          { id: 'messages', label: `Messages (${messages?.length || 0})` },
           { id: 'documents', label: `Documents (${documents?.length || 0})` },
-          { id: 'care_plan', label: 'My Care Plan' },
+          { id: 'care_plan', label: 'Care Plan' },
+          { id: 'privacy', label: 'HIPAA Requests' },
+          { id: 'emergency_help', label: 'Crisis Support (24/7)' },
         ].map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id as any)}
-            className={`px-4 py-2.5 text-xs font-semibold rounded-t-lg transition-colors whitespace-nowrap border-b-2 ${
+            className={`px-3.5 py-2.5 text-xs font-semibold rounded-t-lg transition-colors whitespace-nowrap border-b-2 ${
               activeTab === tab.id
                 ? 'bg-white text-[#216761] border-[#216761] font-bold shadow-xs'
                 : 'text-[#66736F] border-transparent hover:text-[#173F3A] hover:bg-[#F8F5EE]/50'
@@ -351,16 +405,14 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
                       331 E Main Street Suite 200, Rock Hill, SC
                     </span>
                   )}
-                  {nextAppointment.deliveryMethod === 'telehealth' && nextAppointment.telehealthLink && (
-                    <a
-                      href={nextAppointment.telehealthLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                  {nextAppointment.deliveryMethod === 'telehealth' && (
+                    <button
+                      onClick={() => setActiveTab('video_session')}
                       className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#C6A66B] text-[#173F3A] font-bold text-xs hover:bg-[#d8b87d]"
                     >
                       <Video className="w-3.5 h-3.5" />
                       Join Telehealth Room
-                    </a>
+                    </button>
                   )}
                 </div>
 
@@ -395,8 +447,8 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
             </div>
           )}
 
-          {/* 3 Quick Hub Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Quick Hub Cards Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {/* Card 1: Intake & Consent Status */}
             <div className="bg-white rounded-xl border border-[#A9C2B2]/40 p-6 shadow-xs flex flex-col justify-between">
               <div>
@@ -411,14 +463,73 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
                 </p>
               </div>
               <button
-                onClick={() => setActiveTab('intake')}
+                onClick={() => setActiveTab('onboarding')}
                 className="text-xs font-bold text-[#216761] hover:underline inline-flex items-center gap-1"
               >
                 {clientIntake?.status === 'approved' ? 'Review Submission →' : 'Complete Form Now →'}
               </button>
             </div>
 
-            {/* Card 2: Care Plan Tracker */}
+            {/* Card 2: Approved Formal Clinical Reports */}
+            <div className="bg-white rounded-xl border border-[#A9C2B2]/40 p-6 shadow-xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-bold text-[#173F3A]">Formal Clinical Reports</span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                    Human-Reviewed
+                  </span>
+                </div>
+                <p className="text-xs text-[#66736F] leading-relaxed mb-4">
+                  Review your formal interview assessments, clinical insights, and signed documentation by Dr. Sarah Jenkins, LPC.
+                </p>
+              </div>
+              <button
+                onClick={() => setActiveTab('reports')}
+                className="text-xs font-bold text-[#216761] hover:underline inline-flex items-center gap-1"
+              >
+                View Approved Reports →
+              </button>
+            </div>
+
+            {/* Card 3: Wellness Program & Somatic Tools */}
+            <div className="bg-white rounded-xl border border-[#A9C2B2]/40 p-6 shadow-xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-bold text-[#173F3A]">My Wellness Program</span>
+                  <span className="text-xs font-semibold text-[#216761]">4-7-8 Breathing</span>
+                </div>
+                <p className="text-xs text-[#66736F] leading-relaxed mb-4">
+                  Interactive somatic breathing exercises, daily mindfulness routines, and SMART health targets approved by your provider.
+                </p>
+              </div>
+              <button
+                onClick={() => setActiveTab('wellness')}
+                className="text-xs font-bold text-[#216761] hover:underline inline-flex items-center gap-1"
+              >
+                Launch Wellness Program →
+              </button>
+            </div>
+
+            {/* Card 4: Weekly Progress Check-in */}
+            <div className="bg-white rounded-xl border border-[#A9C2B2]/40 p-6 shadow-xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-bold text-[#173F3A]">Weekly Progress Log</span>
+                  <span className="text-[10px] font-mono text-[#216761] font-bold">2-Min Check-in</span>
+                </div>
+                <p className="text-xs text-[#66736F] leading-relaxed mb-4">
+                  Track your mood, energy levels, and routine consistency so your clinician can tailor your upcoming sessions.
+                </p>
+              </div>
+              <button
+                onClick={() => setActiveTab('checkins')}
+                className="text-xs font-bold text-[#216761] hover:underline inline-flex items-center gap-1"
+              >
+                Log Weekly Check-in →
+              </button>
+            </div>
+
+            {/* Card 5: Care Plan Tracker */}
             <div className="bg-white rounded-xl border border-[#A9C2B2]/40 p-6 shadow-xs flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-3">
@@ -428,7 +539,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
                   </span>
                 </div>
                 <p className="text-xs text-[#66736F] leading-relaxed mb-4">
-                  Focus: <strong>{activeCarePlan?.goals?.[0]?.title ?? activeCarePlan?.primaryGoals?.[0] ?? activeCarePlan?.diagnosisOrFocus ?? 'Anxiety & Emotion Regulation'}</strong>. Reviewed quarterly by your licensed clinician.
+                  Focus: <strong>{activeCarePlan?.goals?.[0]?.title ?? activeCarePlan?.primaryGoals?.[0] ?? activeCarePlan?.diagnosisOrFocus ?? 'Anxiety & Emotion Regulation'}</strong>.
                 </p>
               </div>
               <button
@@ -439,22 +550,22 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
               </button>
             </div>
 
-            {/* Card 3: Secure Messaging */}
+            {/* Card 6: Consent Center & Recording Rights */}
             <div className="bg-white rounded-xl border border-[#A9C2B2]/40 p-6 shadow-xs flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold text-[#173F3A]">Secure Provider Chat</span>
-                  <span className="text-xs text-[#66736F] font-mono">Encrypted</span>
+                  <span className="text-xs font-bold text-[#173F3A]">Consent & Recording Rights</span>
+                  <Shield className="w-4 h-4 text-[#216761]" />
                 </div>
                 <p className="text-xs text-[#66736F] leading-relaxed mb-4">
-                  Direct, confidential messaging with Dr. Sarah Jenkins and intake staff. Non-emergency replies within 24 hours.
+                  Full control over your treatment agreements and session recording consents. Revocable anytime with zero care penalty.
                 </p>
               </div>
               <button
-                onClick={() => setActiveTab('messages')}
+                onClick={() => setActiveTab('consents')}
                 className="text-xs font-bold text-[#216761] hover:underline inline-flex items-center gap-1"
               >
-                Open Message Center →
+                Manage Authorizations →
               </button>
             </div>
           </div>
@@ -525,14 +636,14 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
         </div>
       )}
 
-      {/* Tab 3: INTAKE & CONSENT */}
-      {activeTab === 'intake' && (
-        <ClientIntakeForm
-          existingIntake={clientIntake}
-          onCompleted={() => {
+      {/* Tab 3: INTAKE & ONBOARDING */}
+      {activeTab === 'onboarding' && (
+        <ClientOnboardingWizard
+          onComplete={() => {
             loadData();
             setActiveTab('overview');
           }}
+          onCancel={() => setActiveTab('overview')}
         />
       )}
 
@@ -766,34 +877,34 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
           </div>
 
           <div className="space-y-6">
-            {activeCarePlan?.goals && activeCarePlan.goals.length > 0 ? (
+            {activeCarePlan?.goals && Array.isArray(activeCarePlan.goals) && activeCarePlan.goals.length > 0 ? (
               activeCarePlan.goals.map((goal, idx) => (
-                <div key={goal.id} className="p-5 rounded-xl border border-[#A9C2B2]/40 bg-[#F8F5EE]/40 space-y-3">
+                <div key={goal?.id || idx} className="p-5 rounded-xl border border-[#A9C2B2]/40 bg-[#F8F5EE]/40 space-y-3">
                   <div className="flex items-center justify-between">
                     <h4 className="font-serif font-bold text-base text-[#173F3A]">
-                      Goal {idx + 1}: {goal.title}
+                      Goal {idx + 1}: {goal?.title || 'Clinical Objective'}
                     </h4>
                     <span className="text-xs font-semibold px-2.5 py-0.5 rounded bg-[#216761]/15 text-[#173F3A] capitalize">
-                      {goal.status?.replace('_', ' ') || 'in progress'}
+                      {goal?.status?.replace('_', ' ') || 'in progress'}
                     </span>
                   </div>
 
                   <p className="text-xs text-[#66736F] leading-relaxed">
-                    {goal.description}
+                    {goal?.description || ''}
                   </p>
 
-                  {goal.milestones && goal.milestones.length > 0 && (
+                  {goal?.milestones && Array.isArray(goal.milestones) && goal.milestones.length > 0 && (
                     <div className="pt-2">
                       <span className="text-[11px] font-bold text-[#173F3A] block mb-2">Milestones:</span>
                       <div className="space-y-2">
                         {goal.milestones.map((m, mIdx) => (
                           <div key={mIdx} className="flex items-center gap-2 text-xs text-[#202826]">
-                            {m.completed ? (
+                            {m?.completed ? (
                               <CheckCircle2 className="w-4 h-4 text-[#216761] shrink-0" />
                             ) : (
                               <span className="w-4 h-4 rounded-full border border-gray-400 shrink-0" />
                             )}
-                            <span className={m.completed ? 'line-through text-gray-500' : ''}>{m.title}</span>
+                            <span className={m?.completed ? 'line-through text-gray-500' : ''}>{m?.title || ''}</span>
                           </div>
                         ))}
                       </div>
@@ -801,7 +912,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
                   )}
                 </div>
               ))
-            ) : activeCarePlan?.primaryGoals && activeCarePlan.primaryGoals.length > 0 ? (
+            ) : activeCarePlan?.primaryGoals && Array.isArray(activeCarePlan.primaryGoals) && activeCarePlan.primaryGoals.length > 0 ? (
               activeCarePlan.primaryGoals.map((goalStr, idx) => (
                 <div key={idx} className="p-5 rounded-xl border border-[#A9C2B2]/40 bg-[#F8F5EE]/40 space-y-3">
                   <div className="flex items-center justify-between">
@@ -824,6 +935,148 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
             )}
           </div>
         </div>
+      )}
+
+      {/* Tab: TELEHEALTH VIDEO SESSION */}
+      {activeTab === 'video_session' && (
+        <ClientVideoSessionView
+          providerName={nextAppointment?.providerName || 'Dr. Sarah Jenkins, LPC'}
+          serviceName={nextAppointment?.serviceName || 'Comprehensive Behavioral Health Consultation'}
+          onEndSession={() => setActiveTab('overview')}
+        />
+      )}
+
+      {/* Tab: FORMAL REPORTS */}
+      {activeTab === 'reports' && (
+        <ClientReportsView />
+      )}
+
+      {/* Tab: WELLNESS PROGRAM */}
+      {activeTab === 'wellness' && (
+        <WellnessProgramView programId="wp-vance-001" />
+      )}
+
+      {/* Tab: WEEKLY CHECK-INS */}
+      {activeTab === 'checkins' && (
+        <ClientProgressCheckInsView />
+      )}
+
+      {/* Tab: CONSENT CENTER */}
+      {activeTab === 'consents' && (
+        <ClientConsentsView />
+      )}
+
+      {/* Tab: BILLING & INVOICES */}
+      {activeTab === 'billing' && (
+        <div className="bg-white rounded-2xl border border-[#A9C2B2]/40 p-6 sm:p-8 shadow-xs space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#F1ECE1] pb-4">
+            <div>
+              <span className="text-xs font-bold uppercase tracking-widest text-[#216761]">
+                Financial Statement
+              </span>
+              <h3 className="font-serif font-bold text-xl text-[#173F3A] mt-1">
+                Client Statements, Invoices & Claims
+              </h3>
+              <p className="text-xs text-[#66736F] mt-0.5">
+                Itemized CPT coding, copay receipts, and Medicaid insurance billing details.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1 bg-[#F8F5EE] border border-[#A9C2B2]/60 text-xs font-semibold rounded-lg text-[#173F3A]">
+                Primary Payer: SC Medicaid Healthy Connections
+              </span>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {clientInvoices.length === 0 ? (
+              <p className="text-xs text-[#66736F] text-center py-6">No invoices currently posted to your account.</p>
+            ) : (
+              clientInvoices.map((inv) => (
+                <div
+                  key={inv.id}
+                  className="p-5 rounded-xl border border-[#A9C2B2]/40 bg-[#F8F5EE]/30 space-y-4"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#F1ECE1] pb-3">
+                    <div>
+                      <span className="text-xs font-bold text-[#173F3A] block">{inv.invoiceNumber || inv.id}</span>
+                      <span className="text-[11px] text-[#66736F]">Date of Service: {inv.serviceDate || inv.sessionDate || '2026-03-20'}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full capitalize ${
+                        inv.status === 'paid' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        {inv.status?.replace('_', ' ') || 'pending'}
+                      </span>
+                      <span className="text-sm font-bold text-[#173F3A]">
+                        Total: ${(inv.totalBilled || inv.feeAmount || 150).toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-[#A9C2B2]/30 text-[#66736F]">
+                          <th className="py-1 font-semibold">CPT Code</th>
+                          <th className="py-1 font-semibold">Service Description</th>
+                          <th className="py-1 font-semibold text-right">Fee</th>
+                          <th className="py-1 font-semibold text-right">Client Copay</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {inv.billingCodes && inv.billingCodes.length > 0 ? (
+                          inv.billingCodes.map((bc, idx) => (
+                            <tr key={idx}>
+                              <td className="py-2 font-mono text-[#216761]">{bc.code}</td>
+                              <td className="py-2 text-[#173F3A]">{bc.description}</td>
+                              <td className="py-2 text-right">${bc.standardFee.toFixed(2)}</td>
+                              <td className="py-2 text-right font-semibold text-[#173F3A]">
+                                ${inv.status === 'paid' ? '0.00' : (inv.clientCopayDue ?? 20).toFixed(2)}
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td className="py-2 font-mono text-[#216761]">90837</td>
+                            <td className="py-2 text-[#173F3A]">{inv.serviceName || 'Behavioral Health Session'}</td>
+                            <td className="py-2 text-right">${(inv.feeAmount || 150).toFixed(2)}</td>
+                            <td className="py-2 text-right font-semibold text-[#173F3A]">
+                              ${inv.status === 'paid' ? '0.00' : (inv.clientCopayDue ?? 20).toFixed(2)}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between text-xs text-[#66736F] pt-2 border-t border-[#F1ECE1]">
+                    <span>Reference / Claim ID: <code className="font-mono text-[11px]">{inv.invoiceReference || inv.paymentReceiptNumber || 'CLM-SC-2026-0042'}</code></span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => alert(`Receipt #${inv.invoiceNumber || inv.id} downloaded securely. Zero card numbers or CVVs stored.`)}
+                        className="px-3 py-1.5 rounded-lg border border-[#A9C2B2]/60 text-xs font-semibold text-[#173F3A] hover:bg-[#F8F5EE] flex items-center gap-1.5"
+                      >
+                        <Receipt className="w-3.5 h-3.5 text-[#216761]" />
+                        Download Superbill Receipt
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Tab: HIPAA PRIVACY REQUESTS */}
+      {activeTab === 'privacy' && (
+        <ClientPrivacyRequestsView />
+      )}
+
+      {/* Tab: CRISIS & EMERGENCY HELP */}
+      {activeTab === 'emergency_help' && (
+        <ClientEmergencyHelpView />
       )}
 
       {/* Cancel Appointment Modal */}

@@ -29,13 +29,34 @@ import {
   Building,
   Building2,
   ClipboardList,
+  Mic,
+  FileSignature,
+  HeartHandshake,
+  Receipt,
 } from 'lucide-react';
 import { StatusBadge } from '../common/StatusBadge';
 import { EmergencyBanner } from '../common/EmergencyBanner';
+import { SessionWorkspace } from '../clinical/SessionWorkspace';
+import { ReviewWorkspace } from '../clinical/ReviewWorkspace';
+import { WellnessProgramView } from '../clinical/WellnessProgramView';
+import { BillingAuditView } from '../clinical/BillingAuditView';
 
 export const StaffPortal: React.FC = () => {
   const { currentUser } = useAuth();
-  const [activeTab, setActiveTab] = useState<'schedule' | 'intakes' | 'requests' | 'care_plans' | 'messages' | 'referrals' | 'waitlist'>('schedule');
+  const [activeTab, setActiveTab] = useState<
+    | 'schedule'
+    | 'session_workspace'
+    | 'formal_reports'
+    | 'wellness_programs'
+    | 'billing_audit'
+    | 'intakes'
+    | 'requests'
+    | 'care_plans'
+    | 'messages'
+    | 'referrals'
+    | 'waitlist'
+  >('schedule');
+  const [selectedSessionApt, setSelectedSessionApt] = useState<Appointment | null>(null);
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [intakes, setIntakes] = useState<IntakeSubmission[]>([]);
@@ -68,14 +89,14 @@ export const StaffPortal: React.FC = () => {
     setServiceRequests(dbStore.getServiceRequests(currentUser));
     setCarePlans(dbStore.getCarePlans(currentUser));
     try {
-      setReferrals(dbStore.getReferrals(currentUser));
+      setReferrals(dbStore.getReferrals(currentUser) || []);
     } catch {
       setReferrals([]);
     }
-    setWaitlist(dbStore.getWaitlist(currentUser));
-    const convs = dbStore.getConversations(currentUser);
+    setWaitlist(dbStore.getWaitlist(currentUser) || []);
+    const convs = dbStore.getConversations(currentUser) || [];
     setConversations(convs);
-    if (convs.length > 0 && !selectedConvId) {
+    if (convs && convs.length > 0 && !selectedConvId) {
       setSelectedConvId(convs[0].id);
     }
   };
@@ -90,8 +111,15 @@ export const StaffPortal: React.FC = () => {
 
   useEffect(() => {
     if (selectedConvId && currentUser) {
-      setMessages(dbStore.getMessages(selectedConvId, currentUser));
-      dbStore.markMessagesAsRead(selectedConvId, currentUser);
+      try {
+        setMessages(dbStore.getMessages(selectedConvId, currentUser) || []);
+        dbStore.markMessagesAsRead(selectedConvId, currentUser);
+      } catch (err) {
+        console.warn('Error fetching staff messages:', err);
+        setMessages([]);
+      }
+    } else {
+      setMessages([]);
     }
   }, [selectedConvId, currentUser]);
 
@@ -189,6 +217,10 @@ export const StaffPortal: React.FC = () => {
       <div className="border-b border-[#A9C2B2]/40 flex items-center gap-2 overflow-x-auto pb-px">
         {[
           { id: 'schedule', label: `Clinical Schedule (${appointments.length})` },
+          { id: 'session_workspace', label: 'Session & Recording' },
+          { id: 'formal_reports', label: 'Formal Reports & Review' },
+          { id: 'wellness_programs', label: 'Wellness Programs' },
+          { id: 'billing_audit', label: 'Billing & Claims' },
           { id: 'intakes', label: `Intake Queue (${pendingIntakesCount} pending)` },
           { id: 'referrals', label: `Partner Referrals (${referrals.length})` },
           { id: 'waitlist', label: `Service Waitlist (${waitlist.length})` },
@@ -284,12 +316,24 @@ export const StaffPortal: React.FC = () => {
                       </button>
                     )}
                     {apt.status === 'confirmed' && (
-                      <button
-                        onClick={() => handleUpdateAptStatus(apt.id, 'completed')}
-                        className="px-3 py-1.5 rounded-lg bg-emerald-700 text-white text-xs font-semibold hover:bg-emerald-800"
-                      >
-                        Mark Completed
-                      </button>
+                      <>
+                        <button
+                          onClick={() => {
+                            setSelectedSessionApt(apt);
+                            setActiveTab('session_workspace');
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-[#173F3A] text-[#C6A66B] text-xs font-semibold hover:bg-[#216761] flex items-center gap-1.5 shadow-xs"
+                        >
+                          <Mic className="w-3.5 h-3.5" />
+                          Session & Recording
+                        </button>
+                        <button
+                          onClick={() => handleUpdateAptStatus(apt.id, 'completed')}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-700 text-white text-xs font-semibold hover:bg-emerald-800"
+                        >
+                          Mark Completed
+                        </button>
+                      </>
                     )}
                     {!['client_canceled', 'staff_canceled', 'completed'].includes(apt.status) && (
                       <button
@@ -303,6 +347,71 @@ export const StaffPortal: React.FC = () => {
                 </div>
               ))}
           </div>
+        </div>
+      )}
+
+      {/* Tab: SESSION WORKSPACE */}
+      {activeTab === 'session_workspace' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between bg-white p-4 rounded-xl border border-[#A9C2B2]/40 shadow-xs">
+            <div>
+              <h3 className="font-serif font-bold text-base text-[#173F3A]">
+                Clinical Session Workspace: {selectedSessionApt?.clientName || 'Eleanor Vance'}
+              </h3>
+              <p className="text-xs text-[#66736F]">
+                Modality: <strong className="capitalize">{selectedSessionApt?.deliveryMethod || 'Video Telehealth'}</strong> • Service: {selectedSessionApt?.serviceName || 'Comprehensive Clinical Behavioral Assessment'}
+              </p>
+            </div>
+            <button
+              onClick={() => setActiveTab('schedule')}
+              className="px-3 py-1.5 rounded-lg border border-[#A9C2B2]/50 text-xs font-semibold text-[#173F3A] hover:bg-[#F8F5EE]"
+            >
+              Back to Schedule
+            </button>
+          </div>
+          <SessionWorkspace
+            appointmentId={selectedSessionApt?.id || 'apt-001'}
+            clientId={selectedSessionApt?.clientId || 'user-client-1'}
+            clientName={selectedSessionApt?.clientName || 'Eleanor Vance'}
+            modality={
+              selectedSessionApt?.deliveryMethod === 'in_home'
+                ? 'home'
+                : selectedSessionApt?.deliveryMethod === 'office'
+                ? 'office'
+                : 'video'
+            }
+            onConcludeSession={() => {
+              setActiveTab('formal_reports');
+            }}
+          />
+        </div>
+      )}
+
+      {/* Tab: FORMAL REPORTS */}
+      {activeTab === 'formal_reports' && (
+        <div className="space-y-4">
+          <ReviewWorkspace
+            reportId="rpt-vance-001"
+            onApprovalComplete={() => {
+              setActiveTab('wellness_programs');
+            }}
+          />
+        </div>
+      )}
+
+      {/* Tab: WELLNESS PROGRAMS */}
+      {activeTab === 'wellness_programs' && (
+        <div className="space-y-4">
+          <WellnessProgramView
+            programId="wp-vance-001"
+          />
+        </div>
+      )}
+
+      {/* Tab: BILLING AUDIT */}
+      {activeTab === 'billing_audit' && (
+        <div className="space-y-4">
+          <BillingAuditView />
         </div>
       )}
 

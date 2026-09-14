@@ -24,11 +24,24 @@ import {
 } from 'lucide-react';
 import { EmergencyBanner } from '../common/EmergencyBanner';
 import { INITIAL_SERVICES } from '../../db/initialData';
+import { ProviderCredentialingView } from '../clinical/ProviderCredentialingView';
+import { SafetyIncidentLogView } from '../clinical/SafetyIncidentLogView';
+import { BillingAuditView } from '../clinical/BillingAuditView';
 
 export const AdminPortal: React.FC = () => {
   const { currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'users' | 'audit' | 'job_applications' | 'inquiries' | 'services' | 'settings' | 'compliance'
+    | 'overview'
+    | 'credentials'
+    | 'safety_incidents'
+    | 'billing_audit'
+    | 'users'
+    | 'audit'
+    | 'job_applications'
+    | 'inquiries'
+    | 'services'
+    | 'settings'
+    | 'compliance'
   >('overview');
 
   const [users, setUsers] = useState<User[]>([]);
@@ -171,6 +184,9 @@ export const AdminPortal: React.FC = () => {
       <div className="border-b border-[#A9C2B2]/40 flex items-center gap-2 overflow-x-auto pb-px">
         {[
           { id: 'overview', label: 'Practice Overview' },
+          { id: 'credentials', label: 'Provider Credentialing' },
+          { id: 'safety_incidents', label: 'Safety & Crisis Log' },
+          { id: 'billing_audit', label: 'Billing & Claims Audit' },
           { id: 'users', label: `Staff & Users Directory (${users.length})` },
           { id: 'audit', label: `HIPAA Audit Trail (${auditLogs.length})` },
           { id: 'job_applications', label: `Career Applications (${jobApplications.length})` },
@@ -255,6 +271,21 @@ export const AdminPortal: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Tab: PROVIDER CREDENTIALING */}
+      {activeTab === 'credentials' && (
+        <ProviderCredentialingView />
+      )}
+
+      {/* Tab: SAFETY INCIDENTS */}
+      {activeTab === 'safety_incidents' && (
+        <SafetyIncidentLogView />
+      )}
+
+      {/* Tab: BILLING AUDIT */}
+      {activeTab === 'billing_audit' && (
+        <BillingAuditView />
       )}
 
       {/* Tab 2: USERS DIRECTORY */}

@@ -67,7 +67,10 @@ function getStored<T>(key: string, fallback: T): T {
   try {
     const item = localStorage.getItem(key);
     if (!item) return fallback;
-    return JSON.parse(item);
+    const parsed = JSON.parse(item);
+    if (parsed === null || parsed === undefined) return fallback;
+    if (Array.isArray(fallback) && !Array.isArray(parsed)) return fallback;
+    return parsed;
   } catch (err) {
     console.warn(`Error reading ${key} from storage:`, err);
     return fallback;
@@ -477,22 +480,33 @@ export class DatabaseStore {
 
   // --- Secure Messaging ---
   public getConversations(requestingUser: User): Conversation[] {
+    if (!this.conversations || !Array.isArray(this.conversations)) {
+      this.conversations = INITIAL_CONVERSATIONS;
+    }
+    if (!requestingUser) return [];
     if (requestingUser.role === 'client' || requestingUser.role === 'parent_guardian') {
-      return this.conversations.filter((c) => c.clientId === requestingUser.id);
+      return this.conversations.filter((c) => c && c.clientId === requestingUser.id);
     }
     if (requestingUser.role === 'provider') {
-      return this.conversations.filter((c) => c.staffId === requestingUser.id);
+      return this.conversations.filter((c) => c && c.staffId === requestingUser.id);
     }
     return [...this.conversations];
   }
 
   public getMessages(conversationId: string, requestingUser: User): SecureMessage[] {
-    const conv = this.conversations.find((c) => c.id === conversationId);
-    if (!conv) return [];
-    if (requestingUser.role === 'client' && conv.clientId !== requestingUser.id) {
-      throw new Error('Access denied to private conversation.');
+    if (!this.conversations || !Array.isArray(this.conversations)) {
+      this.conversations = INITIAL_CONVERSATIONS;
     }
-    return this.messages.filter((m) => m.conversationId === conversationId);
+    if (!this.messages || !Array.isArray(this.messages)) {
+      this.messages = INITIAL_MESSAGES;
+    }
+    if (!requestingUser || !conversationId) return [];
+    const conv = this.conversations.find((c) => c && c.id === conversationId);
+    if (!conv) return [];
+    if ((requestingUser.role === 'client' || requestingUser.role === 'parent_guardian') && conv.clientId !== requestingUser.id) {
+      return [];
+    }
+    return this.messages.filter((m) => m && m.conversationId === conversationId);
   }
 
   public sendMessage(conversationId: string, content: string, sender: User, attachmentName?: string, attachmentSize?: string): SecureMessage {

@@ -7,8 +7,12 @@ interface CalendarExportProps {
 }
 
 export const CalendarExport: React.FC<CalendarExportProps> = ({ appointment }) => {
-  const downloadIcs = () => {
-    const timeMatch = appointment.timeSlot.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (!appointment || !appointment.date) {
+    return null;
+  }
+
+  const parseTime = (timeSlotStr: string = '') => {
+    const timeMatch = (timeSlotStr || '').match(/(\d+):(\d+)\s*(AM|PM)/i);
     let hours = 10;
     let minutes = 0;
     if (timeMatch) {
@@ -17,17 +21,31 @@ export const CalendarExport: React.FC<CalendarExportProps> = ({ appointment }) =
       if (timeMatch[3].toUpperCase() === 'PM' && hours < 12) hours += 12;
       if (timeMatch[3].toUpperCase() === 'AM' && hours === 12) hours = 0;
     }
+    return { hours, minutes };
+  };
 
-    const pad = (n: number) => n.toString().padStart(2, '0');
-    const [year, month, day] = appointment.date.split('-');
+  const pad = (n: number) => n.toString().padStart(2, '0');
+
+  const getDateParts = (dateStr: string = '') => {
+    const parts = (dateStr || '').split('-');
+    const year = parts[0] || '2026';
+    const month = parts[1] || '01';
+    const day = parts[2] || '01';
+    return { year, month, day };
+  };
+
+  const downloadIcs = () => {
+    const { hours, minutes } = parseTime(appointment.timeSlot);
+    const { year, month, day } = getDateParts(appointment.date);
 
     const startDateStr = `${year}${month}${day}T${pad(hours)}${pad(minutes)}00`;
-    const endHours = hours + Math.floor(appointment.durationMinutes / 60);
-    const endMinutes = (minutes + (appointment.durationMinutes % 60)) % 60;
+    const duration = appointment.durationMinutes || 50;
+    const endHours = hours + Math.floor(duration / 60);
+    const endMinutes = (minutes + (duration % 60)) % 60;
     const endDateStr = `${year}${month}${day}T${pad(endHours)}${pad(endMinutes)}00`;
 
-    const summary = `Hope Community Support: ${appointment.serviceName}`;
-    const description = `Appointment with Hope Community Support (${appointment.deliveryMethod}). Notes: ${appointment.notes || 'Routine appointment'}`;
+    const summary = `Hope Community Support: ${appointment.serviceName || 'Session'}`;
+    const description = `Appointment with Hope Community Support (${appointment.deliveryMethod || 'Service'}). Notes: ${appointment.notes || 'Routine appointment'}`;
     const location =
       appointment.deliveryMethod === 'office'
         ? '331 E Main Street Downtown, Suite 200, Rock Hill, SC 29730'
@@ -40,7 +58,7 @@ export const CalendarExport: React.FC<CalendarExportProps> = ({ appointment }) =
       'VERSION:2.0',
       'PRODID:-//Hope Community Support//Appointments//EN',
       'BEGIN:VEVENT',
-      `UID:${appointment.id}@hopecommunitysupport.com`,
+      `UID:${appointment.id || Date.now()}@hopecommunitysupport.com`,
       `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z`,
       `DTSTART:${startDateStr}`,
       `DTEND:${endDateStr}`,
@@ -64,24 +82,16 @@ export const CalendarExport: React.FC<CalendarExportProps> = ({ appointment }) =
   };
 
   const getGoogleCalendarUrl = () => {
-    const timeMatch = appointment.timeSlot.match(/(\d+):(\d+)\s*(AM|PM)/i);
-    let hours = 10;
-    let minutes = 0;
-    if (timeMatch) {
-      hours = parseInt(timeMatch[1], 10);
-      minutes = parseInt(timeMatch[2], 10);
-      if (timeMatch[3].toUpperCase() === 'PM' && hours < 12) hours += 12;
-      if (timeMatch[3].toUpperCase() === 'AM' && hours === 12) hours = 0;
-    }
-    const pad = (n: number) => n.toString().padStart(2, '0');
-    const [year, month, day] = appointment.date.split('-');
+    const { hours, minutes } = parseTime(appointment.timeSlot);
+    const { year, month, day } = getDateParts(appointment.date);
+    const duration = appointment.durationMinutes || 50;
     const startDateStr = `${year}${month}${day}T${pad(hours)}${pad(minutes)}00`;
-    const endHours = hours + Math.floor(appointment.durationMinutes / 60);
-    const endMinutes = (minutes + (appointment.durationMinutes % 60)) % 60;
+    const endHours = hours + Math.floor(duration / 60);
+    const endMinutes = (minutes + (duration % 60)) % 60;
     const endDateStr = `${year}${month}${day}T${pad(endHours)}${pad(endMinutes)}00`;
 
-    const title = encodeURIComponent(`Hope Community Support: ${appointment.serviceName}`);
-    const details = encodeURIComponent(`Appointment with Hope Community Support (${appointment.deliveryMethod}). Provider: ${appointment.providerName || 'Staff'}`);
+    const title = encodeURIComponent(`Hope Community Support: ${appointment.serviceName || 'Appointment'}`);
+    const details = encodeURIComponent(`Appointment with Hope Community Support (${appointment.deliveryMethod || 'Service'}). Provider: ${appointment.providerName || 'Staff'}`);
     const location = encodeURIComponent(
       appointment.deliveryMethod === 'office'
         ? '331 E Main Street Downtown, Suite 200, Rock Hill, SC 29730'
