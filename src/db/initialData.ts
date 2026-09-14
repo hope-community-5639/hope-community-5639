@@ -657,10 +657,45 @@ export const INITIAL_CARE_PLANS: CarePlan[] = [
     providerId: 'user_provider_1',
     providerName: 'Dr. Sarah Jenkins',
     diagnosisOrFocus: 'Adjustment with Anxiety; Career Transition Stress',
+    targetProblem: 'Adjustment with Anxiety & Acute Workplace Stress',
+    nextReviewDate: '2026-11-25',
     primaryGoals: [
       'Identify and implement 3 somatic grounding techniques during acute stress triggers.',
       'Establish healthy professional boundary frameworks to reduce workplace burnout.',
       'Increase participation in positive community and social activities.',
+    ],
+    goals: [
+      {
+        id: 'goal_1',
+        title: 'Somatic Grounding & Emotion Regulation',
+        description: 'Identify and implement 3 somatic grounding techniques during acute stress triggers.',
+        status: 'in_progress',
+        milestones: [
+          { title: 'Learn box breathing (4-4-4-4 rhythm)', completed: true },
+          { title: 'Practice 5-4-3-2-1 sensory ground daily for 2 weeks', completed: true },
+          { title: 'Utilize grounding prior to high-stress team meetings', completed: false },
+        ],
+      },
+      {
+        id: 'goal_2',
+        title: 'Workplace Boundary Frameworks',
+        description: 'Establish healthy professional boundary frameworks to reduce workplace burnout.',
+        status: 'in_progress',
+        milestones: [
+          { title: 'Define strict offline hours after 6:00 PM', completed: true },
+          { title: 'Practice assertive communication scripts with therapist', completed: false },
+        ],
+      },
+      {
+        id: 'goal_3',
+        title: 'Community & Social Reconnection',
+        description: 'Increase participation in positive community and social activities.',
+        status: 'not_started',
+        milestones: [
+          { title: 'Identify 2 local volunteer or hobby groups', completed: false },
+          { title: 'Attend at least 1 community event per month', completed: false },
+        ],
+      },
     ],
     interventionStrategies: [
       'Cognitive restructuring exercises to challenge catastrophic thinking.',

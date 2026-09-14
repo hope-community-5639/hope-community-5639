@@ -83,17 +83,17 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
 
   const loadData = () => {
     if (!currentUser) return;
-    setAppointments(dbStore.getAppointments(currentUser));
-    setIntakes(dbStore.getIntakes(currentUser));
-    setServiceRequests(dbStore.getServiceRequests(currentUser));
-    const convs = dbStore.getConversations(currentUser);
+    setAppointments(dbStore.getAppointments(currentUser) || []);
+    setIntakes(dbStore.getIntakes(currentUser) || []);
+    setServiceRequests(dbStore.getServiceRequests(currentUser) || []);
+    const convs = dbStore.getConversations(currentUser) || [];
     setConversations(convs);
     if (convs.length > 0 && !selectedConversationId) {
       setSelectedConversationId(convs[0].id);
     }
-    setDocuments(dbStore.getDocuments(currentUser));
-    setCarePlans(dbStore.getCarePlans(currentUser));
-    setNotifications(dbStore.getNotifications(currentUser.id));
+    setDocuments(dbStore.getDocuments(currentUser) || []);
+    setCarePlans(dbStore.getCarePlans(currentUser) || []);
+    setNotifications(dbStore.getNotifications(currentUser.id) || []);
 
     // Also sync directly from Cloud Firestore for client-isolated records
     fetchClientAppointments(currentUser.id).then((fsApts) => {
@@ -293,11 +293,11 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
       <div className="border-b border-[#A9C2B2]/40 flex items-center gap-2 overflow-x-auto pb-px">
         {[
           { id: 'overview', label: 'Dashboard Overview' },
-          { id: 'appointments', label: `Appointments (${appointments.length})` },
+          { id: 'appointments', label: `Appointments (${appointments?.length || 0})` },
           { id: 'intake', label: `Intake & Consents ${clientIntake?.status === 'approved' ? '✓' : '(!)'}` },
-          { id: 'requests', label: `Service Requests (${serviceRequests.length})` },
-          { id: 'messages', label: `Secure Messages (${messages.length})` },
-          { id: 'documents', label: `Documents (${documents.length})` },
+          { id: 'requests', label: `Service Requests (${serviceRequests?.length || 0})` },
+          { id: 'messages', label: `Secure Messages (${messages?.length || 0})` },
+          { id: 'documents', label: `Documents (${documents?.length || 0})` },
           { id: 'care_plan', label: 'My Care Plan' },
         ].map((tab) => (
           <button
@@ -423,10 +423,12 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs font-bold text-[#173F3A]">Individualized Care Plan</span>
-                  <span className="text-xs font-semibold text-[#216761]">{activeCarePlan?.goals.length || 0} Goals</span>
+                  <span className="text-xs font-semibold text-[#216761]">
+                    {activeCarePlan?.goals?.length ?? activeCarePlan?.primaryGoals?.length ?? 0} Goals
+                  </span>
                 </div>
                 <p className="text-xs text-[#66736F] leading-relaxed mb-4">
-                  Focus: <strong>{activeCarePlan?.goals[0]?.title || 'Anxiety & Emotion Regulation'}</strong>. Reviewed quarterly by your licensed clinician.
+                  Focus: <strong>{activeCarePlan?.goals?.[0]?.title ?? activeCarePlan?.primaryGoals?.[0] ?? activeCarePlan?.diagnosisOrFocus ?? 'Anxiety & Emotion Regulation'}</strong>. Reviewed quarterly by your licensed clinician.
                 </p>
               </div>
               <button
@@ -759,43 +761,67 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
               Individualized Care Plan & Goals
             </h3>
             <p className="text-xs text-[#66736F] mt-0.5">
-              Target Problem: <strong>{activeCarePlan?.targetProblem || 'Depressive Symptoms & Behavioral Agitation'}</strong> • Last Updated: {activeCarePlan?.updatedAt.split('T')[0]}
+              Target Problem: <strong>{activeCarePlan?.targetProblem || activeCarePlan?.diagnosisOrFocus || 'Depressive Symptoms & Behavioral Agitation'}</strong> • Last Updated: {activeCarePlan?.updatedAt ? activeCarePlan.updatedAt.split('T')[0] : 'Current'}
             </p>
           </div>
 
           <div className="space-y-6">
-            {activeCarePlan?.goals.map((goal, idx) => (
-              <div key={goal.id} className="p-5 rounded-xl border border-[#A9C2B2]/40 bg-[#F8F5EE]/40 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-serif font-bold text-base text-[#173F3A]">
-                    Goal {idx + 1}: {goal.title}
-                  </h4>
-                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded bg-[#216761]/15 text-[#173F3A] capitalize">
-                    {goal.status.replace('_', ' ')}
-                  </span>
-                </div>
-
-                <p className="text-xs text-[#66736F] leading-relaxed">
-                  {goal.description}
-                </p>
-
-                <div className="pt-2">
-                  <span className="text-[11px] font-bold text-[#173F3A] block mb-2">Milestones:</span>
-                  <div className="space-y-2">
-                    {goal.milestones.map((m, mIdx) => (
-                      <div key={mIdx} className="flex items-center gap-2 text-xs text-[#202826]">
-                        {m.completed ? (
-                          <CheckCircle2 className="w-4 h-4 text-[#216761] shrink-0" />
-                        ) : (
-                          <span className="w-4 h-4 rounded-full border border-gray-400 shrink-0" />
-                        )}
-                        <span className={m.completed ? 'line-through text-gray-500' : ''}>{m.title}</span>
-                      </div>
-                    ))}
+            {activeCarePlan?.goals && activeCarePlan.goals.length > 0 ? (
+              activeCarePlan.goals.map((goal, idx) => (
+                <div key={goal.id} className="p-5 rounded-xl border border-[#A9C2B2]/40 bg-[#F8F5EE]/40 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-serif font-bold text-base text-[#173F3A]">
+                      Goal {idx + 1}: {goal.title}
+                    </h4>
+                    <span className="text-xs font-semibold px-2.5 py-0.5 rounded bg-[#216761]/15 text-[#173F3A] capitalize">
+                      {goal.status?.replace('_', ' ') || 'in progress'}
+                    </span>
                   </div>
+
+                  <p className="text-xs text-[#66736F] leading-relaxed">
+                    {goal.description}
+                  </p>
+
+                  {goal.milestones && goal.milestones.length > 0 && (
+                    <div className="pt-2">
+                      <span className="text-[11px] font-bold text-[#173F3A] block mb-2">Milestones:</span>
+                      <div className="space-y-2">
+                        {goal.milestones.map((m, mIdx) => (
+                          <div key={mIdx} className="flex items-center gap-2 text-xs text-[#202826]">
+                            {m.completed ? (
+                              <CheckCircle2 className="w-4 h-4 text-[#216761] shrink-0" />
+                            ) : (
+                              <span className="w-4 h-4 rounded-full border border-gray-400 shrink-0" />
+                            )}
+                            <span className={m.completed ? 'line-through text-gray-500' : ''}>{m.title}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
+              ))
+            ) : activeCarePlan?.primaryGoals && activeCarePlan.primaryGoals.length > 0 ? (
+              activeCarePlan.primaryGoals.map((goalStr, idx) => (
+                <div key={idx} className="p-5 rounded-xl border border-[#A9C2B2]/40 bg-[#F8F5EE]/40 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-serif font-bold text-base text-[#173F3A]">
+                      Goal {idx + 1}: Primary Clinical Objective
+                    </h4>
+                    <span className="text-xs font-semibold px-2.5 py-0.5 rounded bg-[#216761]/15 text-[#173F3A]">
+                      Active
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#66736F] leading-relaxed">
+                    {goalStr}
+                  </p>
+                </div>
+              ))
+            ) : (
+              <div className="p-8 text-center bg-[#F8F5EE]/50 rounded-xl border border-dashed border-[#A9C2B2]/60">
+                <p className="text-sm text-[#66736F]">Your licensed clinician is currently formulating your individualized care plan goals.</p>
               </div>
-            ))}
+            )}
           </div>
         </div>
       )}

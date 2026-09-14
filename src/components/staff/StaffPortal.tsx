@@ -436,15 +436,15 @@ export const StaffPortal: React.FC = () => {
                 </div>
 
                 <div className="space-y-3">
-                  {plan.goals.map((g, gIdx) => (
-                    <div key={g.id} className="p-3 bg-white rounded-lg border border-[#A9C2B2]/30 text-xs">
+                  {(plan.goals || []).map((g, gIdx) => (
+                    <div key={g.id || gIdx} className="p-3 bg-white rounded-lg border border-[#A9C2B2]/30 text-xs">
                       <div className="flex items-center justify-between mb-1">
                         <strong className="text-[#173F3A]">Goal {gIdx + 1}: {g.title}</strong>
-                        <span className="capitalize font-semibold text-[#216761]">{g.status.replace('_', ' ')}</span>
+                        <span className="capitalize font-semibold text-[#216761]">{g.status?.replace('_', ' ') || 'in progress'}</span>
                       </div>
                       <p className="text-[#66736F] mb-2">{g.description}</p>
                       <div className="space-y-1">
-                        {g.milestones.map((m, mIdx) => (
+                        {(g.milestones || []).map((m, mIdx) => (
                           <div key={mIdx} className="flex items-center gap-2 text-[11px] text-[#202826]">
                             <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[9px] ${m.completed ? 'bg-[#216761] text-white' : 'border border-gray-400'}`}>
                               {m.completed ? '✓' : ''}
@@ -455,6 +455,9 @@ export const StaffPortal: React.FC = () => {
                       </div>
                     </div>
                   ))}
+                  {(!plan.goals || plan.goals.length === 0) && (
+                    <p className="text-xs text-[#66736F] italic">No active sub-goals defined for this plan.</p>
+                  )}
                 </div>
               </div>
             ))}

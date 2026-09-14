@@ -586,10 +586,15 @@ export class DatabaseStore {
 
   // --- Care Plans ---
   public getCarePlans(requestingUser: User): CarePlan[] {
+    const normalizePlan = (p: CarePlan): CarePlan => ({
+      ...p,
+      goals: Array.isArray(p.goals) ? p.goals : [],
+      primaryGoals: Array.isArray(p.primaryGoals) ? p.primaryGoals : [],
+    });
     if (requestingUser.role === 'client' || requestingUser.role === 'parent_guardian') {
-      return this.carePlans.filter((p) => p.clientId === requestingUser.id);
+      return (this.carePlans || []).filter((p) => p.clientId === requestingUser.id).map(normalizePlan);
     }
-    return [...this.carePlans];
+    return (this.carePlans || []).map(normalizePlan);
   }
 
   public saveCarePlan(plan: CarePlan, staffUser: User): void {
