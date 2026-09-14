@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { dbStore } from '../../db/store';
+import { clinicalStore } from '../../db/clinicalStore';
 import {
   Appointment,
   IntakeSubmission,
@@ -12,43 +13,6 @@ import {
   NotificationItem,
 } from '../../types';
 import {
-  Calendar as CalendarIcon,
-  Clock,
-  Video,
-  Home,
-  Building,
-  FileText,
-  MessageSquare,
-  UploadCloud,
-  CheckCircle2,
-  AlertCircle,
-  TrendingUp,
-  Download,
-  Plus,
-  Send,
-  X,
-  Shield,
-  Phone,
-  Activity,
-  Receipt,
-  HeartHandshake,
-  PhoneCall,
-  Sparkles,
-} from 'lucide-react';
-import { StatusBadge } from '../common/StatusBadge';
-import { CalendarExport } from '../common/CalendarExport';
-import { EmergencyBanner } from '../common/EmergencyBanner';
-import { ClientIntakeForm } from './ClientIntakeForm';
-import { ClientOnboardingWizard } from '../clinical/ClientOnboardingWizard';
-import { WellnessProgramView } from '../clinical/WellnessProgramView';
-import { ClientVideoSessionView } from './ClientVideoSessionView';
-import { ClientReportsView } from './ClientReportsView';
-import { ClientConsentsView } from './ClientConsentsView';
-import { ClientProgressCheckInsView } from './ClientProgressCheckInsView';
-import { ClientPrivacyRequestsView } from './ClientPrivacyRequestsView';
-import { ClientEmergencyHelpView } from './ClientEmergencyHelpView';
-import { clinicalStore } from '../../db/clinicalStore';
-import {
   fetchClientAppointments,
   fetchClientServiceRequests,
   fetchUserNotifications,
@@ -58,60 +22,72 @@ import {
   uploadClientDocumentFile,
 } from '../../lib/firebaseService';
 
+// Layout & Modals
+import { ClientPortalLayout } from './ClientPortalLayout';
+import { CrisisSupportModal } from './CrisisSupportModal';
+import { TelehealthConnectionModal } from './TelehealthConnectionModal';
+import { AppointmentBookingModal } from '../scheduling/AppointmentBookingModal';
+import { ClientOnboardingWizard } from '../clinical/ClientOnboardingWizard';
+
+// Subviews
+import { ClientOverviewView } from './views/ClientOverviewView';
+import { CareTeamView } from './views/CareTeamView';
+import { CarePlanView } from './views/CarePlanView';
+import { AppointmentsView } from './views/AppointmentsView';
+import { RequiredFormsView } from './views/RequiredFormsView';
+import { DocumentsView } from './views/DocumentsView';
+import { BillingView } from './views/BillingView';
+import { SecureMessagingView } from './views/SecureMessagingView';
+import { SupportView } from './views/SupportView';
+import { AccountView } from './views/AccountView';
+import { AccessibilitySettingsView } from './views/AccessibilitySettingsView';
+
+// Existing clinical subviews
+import { WellnessProgramView } from '../clinical/WellnessProgramView';
+import { ClientVideoSessionView } from './ClientVideoSessionView';
+import { ClientReportsView } from './ClientReportsView';
+import { ClientConsentsView } from './ClientConsentsView';
+import { ClientProgressCheckInsView } from './ClientProgressCheckInsView';
+import { ClientPrivacyRequestsView } from './ClientPrivacyRequestsView';
+import { ClientEmergencyHelpView } from './ClientEmergencyHelpView';
+
 interface ClientDashboardProps {
   onOpenBooking: () => void;
+  onNavigateHome?: () => void;
 }
 
-export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking }) => {
-  const { currentUser } = useAuth();
-  const [activeTab, setActiveTab] = useState<
-    | 'overview'
-    | 'onboarding'
-    | 'appointments'
-    | 'video_session'
-    | 'reports'
-    | 'wellness'
-    | 'checkins'
-    | 'consents'
-    | 'requests'
-    | 'messages'
-    | 'documents'
-    | 'care_plan'
-    | 'billing'
-    | 'privacy'
-    | 'emergency_help'
-  >('overview');
+export const ClientDashboard: React.FC<ClientDashboardProps> = ({
+  onOpenBooking,
+  onNavigateHome,
+}) => {
+  const { currentUser, logout } = useAuth();
 
+  // Navigation State
+  const [activeTab, setActiveTab] = useState<string>('overview');
+
+  // Modal States
+  const [showCrisisModal, setShowCrisisModal] = useState<boolean>(false);
+  const [showConnectionModal, setShowConnectionModal] = useState<boolean>(false);
+  const [showBookingModal, setShowBookingModal] = useState<boolean>(false);
+  const [showWizardModal, setShowWizardModal] = useState<boolean>(false);
+
+  // Data Store States
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [intakes, setIntakes] = useState<IntakeSubmission[]>([]);
   const [serviceRequests, setServiceRequests] = useState<ServiceRequest[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string>('');
   const [messages, setMessages] = useState<SecureMessage[]>([]);
-  const [clientInvoices, setClientInvoices] = useState(() => clinicalStore.getInvoices(currentUser));
-  const [newMessageText, setNewMessageText] = useState('');
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
   const [carePlans, setCarePlans] = useState<CarePlan[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [clientInvoices, setClientInvoices] = useState(() => clinicalStore.getInvoices(currentUser));
 
-  // Cancellation modal state
-  const [cancelModalApt, setCancelModalApt] = useState<Appointment | null>(null);
-  const [cancelReason, setCancelReason] = useState('');
-
-  // Service request modal state
-  const [showNewRequestModal, setShowNewRequestModal] = useState(false);
-  const [requestType, setRequestType] = useState('In-Home Behavioral Consultation');
-  const [requestUrgency, setRequestUrgency] = useState<'routine' | 'urgent_non_emergency' | 'flexible'>('routine');
-  const [requestDescription, setRequestDescription] = useState('');
-
-  // Document upload state
-  const [uploadTitle, setUploadTitle] = useState('');
-  const [uploadCategory, setUploadCategory] = useState<ClientDocument['category']>('insurance_card');
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  // Async Upload State
   const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
+  // Load Data
   const loadData = () => {
     if (!currentUser) return;
     try {
@@ -129,11 +105,12 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
       setDocuments(dbStore.getDocuments(currentUser) || []);
       setCarePlans(dbStore.getCarePlans(currentUser) || []);
       setNotifications(dbStore.getNotifications(currentUser.id) || []);
+      setClientInvoices(clinicalStore.getInvoices(currentUser) || []);
     } catch (err) {
       console.warn('Error loading dashboard local data:', err);
     }
 
-    // Also sync directly from Cloud Firestore for client-isolated records
+    // Direct Firestore Sync for isolated records
     fetchClientAppointments(currentUser.id).then((fsApts) => {
       if (fsApts && Array.isArray(fsApts) && fsApts.length > 0) {
         setAppointments((prev) => {
@@ -187,6 +164,7 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
     return () => unsubscribe();
   }, [currentUser]);
 
+  // Load Messages for selected thread
   useEffect(() => {
     if (selectedConversationId && currentUser) {
       try {
@@ -202,57 +180,35 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
     }
   }, [selectedConversationId, currentUser]);
 
-  const handleSendMessage = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMessageText.trim() || !selectedConversationId || !currentUser) return;
-    dbStore.sendMessage(selectedConversationId, newMessageText, currentUser);
-    setNewMessageText('');
+  const handleSendMessage = (text: string) => {
+    if (!text.trim() || !selectedConversationId || !currentUser) return;
+    dbStore.sendMessage(selectedConversationId, text, currentUser);
     loadData();
   };
 
-  const handleCancelAppointment = () => {
-    if (!cancelModalApt || !currentUser) return;
-    dbStore.updateAppointmentStatus(cancelModalApt.id, 'client_canceled', cancelReason || 'Client canceled via portal', currentUser);
-    updateFirebaseAppointmentStatus(cancelModalApt.id, 'client_canceled', cancelReason || 'Client canceled via portal').catch(() => {});
-    setCancelModalApt(null);
-    setCancelReason('');
-    loadData();
-  };
-
-  const handleCreateServiceRequest = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCancelAppointment = (apt: Appointment, reason: string) => {
     if (!currentUser) return;
-    const newReq = dbStore.createServiceRequest(
-      {
-        clientId: currentUser.id,
-        clientName: `${currentUser.firstName} ${currentUser.lastName}`,
-        serviceType: requestType,
-        preferredDelivery: 'office',
-        urgency: requestUrgency,
-        details: requestDescription,
-        preferredTimes: ['Morning', 'Afternoon'],
-      },
-      currentUser
-    );
-    saveFirebaseServiceRequest(newReq).catch(() => {});
-    setShowNewRequestModal(false);
-    setRequestDescription('');
+    dbStore.updateAppointmentStatus(apt.id, 'client_canceled', reason, currentUser);
+    updateFirebaseAppointmentStatus(apt.id, 'client_canceled', reason).catch(() => {});
     loadData();
   };
 
-  const handleUploadDocument = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentUser || !uploadTitle) return;
+  const handleUploadDocument = async (
+    title: string,
+    category: ClientDocument['category'],
+    file: File | null
+  ) => {
+    if (!currentUser) return;
     setUploadError(null);
     setIsUploading(true);
 
     try {
-      if (uploadFile) {
+      if (file) {
         const uploadedDoc = await uploadClientDocumentFile(
           currentUser.id,
-          uploadFile,
-          uploadCategory,
-          uploadTitle,
+          file,
+          category,
+          title,
           currentUser
         );
         dbStore.uploadDocument(uploadedDoc, currentUser);
@@ -263,11 +219,11 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
             uploaderId: currentUser.id,
             uploaderName: `${currentUser.firstName} ${currentUser.lastName}`,
             uploaderRole: currentUser.role,
-            title: uploadTitle,
-            fileName: `${uploadTitle.replace(/\s+/g, '_')}.pdf`,
+            title,
+            fileName: `${title.replace(/\s+/g, '_')}.pdf`,
             fileSize: '184 KB',
             fileType: 'application/pdf',
-            category: uploadCategory,
+            category,
             isSharedWithClient: true,
             scanStatus: 'passed',
             isQuarantined: false,
@@ -275,18 +231,18 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
           currentUser
         );
       }
-
-      setShowUploadModal(false);
-      setUploadTitle('');
-      setUploadFile(null);
-      setUploadError(null);
       loadData();
-    } catch (uploadErr: any) {
-      console.error('Document upload failure:', uploadErr);
-      setUploadError(uploadErr?.message || 'Document upload failed. Please verify file format and size.');
+    } catch (err: any) {
+      setUploadError(err?.message || 'Upload rejected. Please verify file format.');
     } finally {
       setIsUploading(false);
     }
+  };
+
+  const handleClearNotifications = () => {
+    if (!currentUser) return;
+    dbStore.clearAllNotifications(currentUser.id);
+    setNotifications([]);
   };
 
   const nextAppointment = (appointments || [])
@@ -296,777 +252,132 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
   const clientIntake = (intakes || [])[0];
   const activeCarePlan = (carePlans || [])[0];
 
+  const unreadMessagesCount = conversations.reduce((sum, c) => sum + (c.unreadCountClient || 0), 0);
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-      <EmergencyBanner compact />
-
-      {/* Header Profile Banner */}
-      <div className="bg-white rounded-2xl border border-[#A9C2B2]/40 p-6 sm:p-8 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-xs font-bold uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-[#216761]/10 text-[#216761]">
-              {currentUser?.role === 'parent_guardian' ? 'Parent / Legal Guardian Portal' : 'Client Wellness Portal'}
-            </span>
-            <span className="text-xs text-[#66736F] font-mono">ID: {currentUser?.id}</span>
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-serif font-bold text-[#173F3A]">
-            Welcome back, {currentUser?.firstName} {currentUser?.lastName}
-          </h1>
-          <p className="text-xs sm:text-sm text-[#66736F] mt-1">
-            Care Coordinator: <strong>Dr. Sarah Jenkins (LPC)</strong> • Clinic: Downtown Rock Hill Suite 200
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onOpenBooking}
-            className="px-4 py-2.5 rounded-lg bg-[#216761] text-white text-xs font-bold hover:bg-[#173F3A] transition-colors flex items-center gap-2 shadow-xs"
-          >
-            <Plus className="w-4 h-4 text-[#C6A66B]" />
-            Request Appointment
-          </button>
-          <button
-            onClick={() => setActiveTab('onboarding')}
-            className="px-4 py-2.5 rounded-lg bg-[#F8F5EE] border border-[#216761]/40 text-[#173F3A] text-xs font-semibold hover:bg-[#EFEAE0] transition-colors flex items-center gap-2"
-          >
-            <FileText className="w-4 h-4 text-[#216761]" />
-            {clientIntake?.status === 'approved' ? 'View Intake Record' : 'Complete Intake'}
-          </button>
-        </div>
-      </div>
-
-      {/* Navigation Tabs */}
-      <div className="border-b border-[#A9C2B2]/40 flex items-center gap-2 overflow-x-auto pb-px">
-        {[
-          { id: 'overview', label: 'Dashboard Overview' },
-          { id: 'onboarding', label: `Intake & Consents ${clientIntake?.status === 'approved' ? '✓' : '(!)'}` },
-          { id: 'appointments', label: `Appointments (${appointments?.length || 0})` },
-          { id: 'video_session', label: 'Telehealth Room' },
-          { id: 'reports', label: 'Formal Reports' },
-          { id: 'wellness', label: 'Wellness Program' },
-          { id: 'checkins', label: 'Weekly Check-ins' },
-          { id: 'consents', label: 'Consent Center' },
-          { id: 'billing', label: `Billing & Invoices (${clientInvoices.length})` },
-          { id: 'requests', label: `Service Requests (${serviceRequests?.length || 0})` },
-          { id: 'messages', label: `Messages (${messages?.length || 0})` },
-          { id: 'documents', label: `Documents (${documents?.length || 0})` },
-          { id: 'care_plan', label: 'Care Plan' },
-          { id: 'privacy', label: 'HIPAA Requests' },
-          { id: 'emergency_help', label: 'Crisis Support (24/7)' },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id as any)}
-            className={`px-3.5 py-2.5 text-xs font-semibold rounded-t-lg transition-colors whitespace-nowrap border-b-2 ${
-              activeTab === tab.id
-                ? 'bg-white text-[#216761] border-[#216761] font-bold shadow-xs'
-                : 'text-[#66736F] border-transparent hover:text-[#173F3A] hover:bg-[#F8F5EE]/50'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab 1: OVERVIEW */}
+    <ClientPortalLayout
+      activeTab={activeTab}
+      onNavigate={setActiveTab}
+      currentUser={currentUser}
+      unreadMessagesCount={unreadMessagesCount}
+      notifications={notifications}
+      onClearNotifications={handleClearNotifications}
+      onOpenCrisisModal={() => setShowCrisisModal(true)}
+      onOpenConnectionTest={() => setShowConnectionModal(true)}
+      onSignOut={() => {
+        logout();
+        if (onNavigateHome) onNavigateHome();
+      }}
+      onExitToPublic={onNavigateHome}
+    >
+      {/* Tab: OVERVIEW */}
       {activeTab === 'overview' && (
-        <div className="space-y-8">
-          {/* Next Upcoming Appointment Highlight */}
-          {nextAppointment ? (
-            <div className="bg-[#173F3A] text-white rounded-2xl p-6 sm:p-8 shadow-md">
-              <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#216761] text-[#C6A66B] text-xs font-bold">
-                  <CalendarIcon className="w-3.5 h-3.5" />
-                  <span>Next Scheduled Session</span>
-                </div>
-                <StatusBadge status={nextAppointment.status} />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div>
-                  <h3 className="font-serif font-bold text-2xl text-white">
-                    {nextAppointment.serviceName}
-                  </h3>
-                  <p className="text-xs text-[#A9C2B2] mt-1">
-                    Provider: <strong>{nextAppointment.providerName}</strong>
-                  </p>
-                  <p className="text-xs text-[#A9C2B2]">
-                    Format: <span className="capitalize font-semibold text-white">{nextAppointment.deliveryMethod}</span> ({nextAppointment.durationMinutes} min)
-                  </p>
-                </div>
-
-                <div className="space-y-1 text-xs">
-                  <span className="text-[#A9C2B2] block">Appointment Date & Time:</span>
-                  <div className="text-lg font-serif font-bold text-[#C6A66B]">
-                    {nextAppointment.date} at {nextAppointment.timeSlot}
-                  </div>
-                  {nextAppointment.deliveryMethod === 'office' && (
-                    <span className="text-[11px] text-[#A9C2B2] block">
-                      331 E Main Street Suite 200, Rock Hill, SC
-                    </span>
-                  )}
-                  {nextAppointment.deliveryMethod === 'telehealth' && (
-                    <button
-                      onClick={() => setActiveTab('video_session')}
-                      className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#C6A66B] text-[#173F3A] font-bold text-xs hover:bg-[#d8b87d]"
-                    >
-                      <Video className="w-3.5 h-3.5" />
-                      Join Telehealth Room
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex flex-col justify-between items-start md:items-end gap-3">
-                  <CalendarExport appointment={nextAppointment} />
-                  <div className="flex items-center gap-2 text-xs">
-                    <button
-                      onClick={() => setCancelModalApt(nextAppointment)}
-                      className="text-rose-300 hover:text-rose-100 hover:underline"
-                    >
-                      Cancel / Reschedule
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="bg-[#F8F5EE] border border-[#A9C2B2]/40 rounded-2xl p-6 text-center space-y-3">
-              <CalendarIcon className="w-10 h-10 text-[#216761] mx-auto" />
-              <h3 className="font-serif font-bold text-lg text-[#173F3A]">
-                No Upcoming Appointments Scheduled
-              </h3>
-              <p className="text-xs text-[#66736F] max-w-md mx-auto">
-                Maintain consistency in your care journey by requesting your next therapy or counseling session.
-              </p>
-              <button
-                onClick={onOpenBooking}
-                className="px-5 py-2.5 bg-[#216761] text-white text-xs font-bold rounded-lg hover:bg-[#173F3A]"
-              >
-                Schedule Session Now
-              </button>
-            </div>
-          )}
-
-          {/* Quick Hub Cards Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {/* Card 1: Intake & Consent Status */}
-            <div className="bg-white rounded-xl border border-[#A9C2B2]/40 p-6 shadow-xs flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold text-[#173F3A]">Intake & Consent Paperwork</span>
-                  <StatusBadge status={clientIntake?.status || 'pending_review'} />
-                </div>
-                <p className="text-xs text-[#66736F] leading-relaxed mb-4">
-                  {clientIntake?.status === 'approved'
-                    ? 'All clinical questionnaires and legal consent disclosures are fully executed and approved.'
-                    : 'Please complete or verify your electronic intake paperwork prior to your next clinical evaluation.'}
-                </p>
-              </div>
-              <button
-                onClick={() => setActiveTab('onboarding')}
-                className="text-xs font-bold text-[#216761] hover:underline inline-flex items-center gap-1"
-              >
-                {clientIntake?.status === 'approved' ? 'Review Submission →' : 'Complete Form Now →'}
-              </button>
-            </div>
-
-            {/* Card 2: Approved Formal Clinical Reports */}
-            <div className="bg-white rounded-xl border border-[#A9C2B2]/40 p-6 shadow-xs flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold text-[#173F3A]">Formal Clinical Reports</span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                    Human-Reviewed
-                  </span>
-                </div>
-                <p className="text-xs text-[#66736F] leading-relaxed mb-4">
-                  Review your formal interview assessments, clinical insights, and signed documentation by Dr. Sarah Jenkins, LPC.
-                </p>
-              </div>
-              <button
-                onClick={() => setActiveTab('reports')}
-                className="text-xs font-bold text-[#216761] hover:underline inline-flex items-center gap-1"
-              >
-                View Approved Reports →
-              </button>
-            </div>
-
-            {/* Card 3: Wellness Program & Somatic Tools */}
-            <div className="bg-white rounded-xl border border-[#A9C2B2]/40 p-6 shadow-xs flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold text-[#173F3A]">My Wellness Program</span>
-                  <span className="text-xs font-semibold text-[#216761]">4-7-8 Breathing</span>
-                </div>
-                <p className="text-xs text-[#66736F] leading-relaxed mb-4">
-                  Interactive somatic breathing exercises, daily mindfulness routines, and SMART health targets approved by your provider.
-                </p>
-              </div>
-              <button
-                onClick={() => setActiveTab('wellness')}
-                className="text-xs font-bold text-[#216761] hover:underline inline-flex items-center gap-1"
-              >
-                Launch Wellness Program →
-              </button>
-            </div>
-
-            {/* Card 4: Weekly Progress Check-in */}
-            <div className="bg-white rounded-xl border border-[#A9C2B2]/40 p-6 shadow-xs flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold text-[#173F3A]">Weekly Progress Log</span>
-                  <span className="text-[10px] font-mono text-[#216761] font-bold">2-Min Check-in</span>
-                </div>
-                <p className="text-xs text-[#66736F] leading-relaxed mb-4">
-                  Track your mood, energy levels, and routine consistency so your clinician can tailor your upcoming sessions.
-                </p>
-              </div>
-              <button
-                onClick={() => setActiveTab('checkins')}
-                className="text-xs font-bold text-[#216761] hover:underline inline-flex items-center gap-1"
-              >
-                Log Weekly Check-in →
-              </button>
-            </div>
-
-            {/* Card 5: Care Plan Tracker */}
-            <div className="bg-white rounded-xl border border-[#A9C2B2]/40 p-6 shadow-xs flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold text-[#173F3A]">Individualized Care Plan</span>
-                  <span className="text-xs font-semibold text-[#216761]">
-                    {activeCarePlan?.goals?.length ?? activeCarePlan?.primaryGoals?.length ?? 0} Goals
-                  </span>
-                </div>
-                <p className="text-xs text-[#66736F] leading-relaxed mb-4">
-                  Focus: <strong>{activeCarePlan?.goals?.[0]?.title ?? activeCarePlan?.primaryGoals?.[0] ?? activeCarePlan?.diagnosisOrFocus ?? 'Anxiety & Emotion Regulation'}</strong>.
-                </p>
-              </div>
-              <button
-                onClick={() => setActiveTab('care_plan')}
-                className="text-xs font-bold text-[#216761] hover:underline inline-flex items-center gap-1"
-              >
-                View Goals & Milestones →
-              </button>
-            </div>
-
-            {/* Card 6: Consent Center & Recording Rights */}
-            <div className="bg-white rounded-xl border border-[#A9C2B2]/40 p-6 shadow-xs flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold text-[#173F3A]">Consent & Recording Rights</span>
-                  <Shield className="w-4 h-4 text-[#216761]" />
-                </div>
-                <p className="text-xs text-[#66736F] leading-relaxed mb-4">
-                  Full control over your treatment agreements and session recording consents. Revocable anytime with zero care penalty.
-                </p>
-              </div>
-              <button
-                onClick={() => setActiveTab('consents')}
-                className="text-xs font-bold text-[#216761] hover:underline inline-flex items-center gap-1"
-              >
-                Manage Authorizations →
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Tab 2: APPOINTMENTS */}
-      {activeTab === 'appointments' && (
-        <div className="bg-white rounded-2xl border border-[#A9C2B2]/40 p-6 sm:p-8 shadow-xs space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#F1ECE1] pb-4">
-            <div>
-              <h3 className="font-serif font-bold text-xl text-[#173F3A]">
-                Appointment History & Schedule
-              </h3>
-              <p className="text-xs text-[#66736F] mt-0.5">
-                View, export to your digital calendar, or request rescheduling.
-              </p>
-            </div>
-            <button
-              onClick={onOpenBooking}
-              className="px-4 py-2 bg-[#216761] text-white text-xs font-bold rounded-lg hover:bg-[#173F3A] flex items-center gap-1.5"
-            >
-              <Plus className="w-4 h-4 text-[#C6A66B]" />
-              New Appointment
-            </button>
-          </div>
-
-          <div className="divide-y divide-[#F1ECE1]">
-            {appointments.map((apt) => (
-              <div key={apt.id} className="py-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-serif font-bold text-base text-[#173F3A]">
-                      {apt.serviceName}
-                    </span>
-                    <StatusBadge status={apt.status} />
-                  </div>
-                  <div className="flex items-center gap-4 text-xs text-[#66736F]">
-                    <span className="flex items-center gap-1">
-                      <CalendarIcon className="w-3.5 h-3.5 text-[#216761]" />
-                      {apt.date} at {apt.timeSlot}
-                    </span>
-                    <span className="capitalize flex items-center gap-1">
-                      {apt.deliveryMethod === 'telehealth' ? <Video className="w-3.5 h-3.5" /> : <Building className="w-3.5 h-3.5" />}
-                      {apt.deliveryMethod} ({apt.durationMinutes} min)
-                    </span>
-                    <span>Provider: {apt.providerName}</span>
-                  </div>
-                  {apt.notes && (
-                    <p className="text-xs text-[#66736F] italic">Notes: "{apt.notes}"</p>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-3 self-end md:self-center">
-                  <CalendarExport appointment={apt} />
-                  {!['client_canceled', 'staff_canceled', 'completed'].includes(apt.status) && (
-                    <button
-                      onClick={() => setCancelModalApt(apt)}
-                      className="text-xs text-rose-700 hover:text-rose-900 font-semibold px-2 py-1 rounded hover:bg-rose-50"
-                    >
-                      Cancel
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Tab 3: INTAKE & ONBOARDING */}
-      {activeTab === 'onboarding' && (
-        <ClientOnboardingWizard
-          onComplete={() => {
-            loadData();
-            setActiveTab('overview');
-          }}
-          onCancel={() => setActiveTab('overview')}
+        <ClientOverviewView
+          currentUser={currentUser}
+          nextAppointment={nextAppointment}
+          intake={clientIntake}
+          carePlan={activeCarePlan}
+          documents={documents}
+          invoices={clientInvoices}
+          unreadMessagesCount={unreadMessagesCount}
+          onNavigateTab={setActiveTab}
+          onRequestBooking={onOpenBooking}
+          onOpenConnectionTest={() => setShowConnectionModal(true)}
+          onJoinTelehealth={(apt) => setActiveTab('video_session')}
         />
       )}
 
-      {/* Tab 4: SERVICE REQUESTS */}
-      {activeTab === 'requests' && (
-        <div className="bg-white rounded-2xl border border-[#A9C2B2]/40 p-6 sm:p-8 shadow-xs space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#F1ECE1] pb-4">
-            <div>
-              <h3 className="font-serif font-bold text-xl text-[#173F3A]">
-                Specialized Service & Community Requests
-              </h3>
-              <p className="text-xs text-[#66736F] mt-0.5">
-                Submit requests for in-home care, school consultation, transportation assistance, or specialized therapy.
-              </p>
-            </div>
-            <button
-              onClick={() => setShowNewRequestModal(true)}
-              className="px-4 py-2 bg-[#216761] text-white text-xs font-bold rounded-lg hover:bg-[#173F3A] flex items-center gap-1.5"
-            >
-              <Plus className="w-4 h-4 text-[#C6A66B]" />
-              New Service Request
-            </button>
-          </div>
-
-          <div className="space-y-4">
-            {serviceRequests.map((req) => (
-              <div
-                key={req.id}
-                className="p-5 rounded-xl border border-[#A9C2B2]/40 bg-[#F8F5EE]/40 space-y-3"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-serif font-bold text-sm text-[#173F3A]">
-                      {req.serviceType}
-                    </span>
-                    <StatusBadge status={req.status} />
-                  </div>
-                  <span className="text-[11px] text-[#66736F] font-mono">
-                    Submitted: {req.createdAt.split('T')[0]}
-                  </span>
-                </div>
-
-                <p className="text-xs text-[#202826] leading-relaxed">
-                  {req.description}
-                </p>
-
-                {req.responseNotes && (
-                  <div className="p-3 bg-white rounded-lg border border-[#A9C2B2]/30 text-xs text-[#173F3A]">
-                    <span className="font-bold block text-[11px] text-[#216761]">
-                      Staff Reviewer Note ({req.assignedStaffName || 'Intake Department'}):
-                    </span>
-                    {req.responseNotes}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
+      {/* Tab: CARE TEAM */}
+      {activeTab === 'care_team' && (
+        <CareTeamView
+          onMessageMember={() => setActiveTab('messages')}
+          onRequestAppointment={onOpenBooking}
+        />
       )}
 
-      {/* Tab 5: SECURE MESSAGING */}
-      {activeTab === 'messages' && (
-        <div className="bg-white rounded-2xl border border-[#A9C2B2]/40 overflow-hidden shadow-xs grid grid-cols-1 md:grid-cols-3 min-h-[500px]">
-          {/* Conversation List */}
-          <div className="border-r border-[#F1ECE1] p-4 bg-[#F8F5EE]/50">
-            <span className="text-xs font-bold text-[#173F3A] block mb-3 uppercase tracking-wider">
-              Care Team Conversations
-            </span>
-            <div className="space-y-2">
-              {conversations.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => setSelectedConversationId(c.id)}
-                  className={`w-full text-left p-3 rounded-xl transition-all border ${
-                    selectedConversationId === c.id
-                      ? 'bg-white border-[#216761] shadow-xs'
-                      : 'border-transparent hover:bg-white/80'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <strong className="text-xs text-[#173F3A]">{c.staffName}</strong>
-                    <span className="text-[10px] text-[#66736F]">{c.lastMessageAt.split('T')[0]}</span>
-                  </div>
-                  <p className="text-[11px] text-[#66736F] truncate">{c.lastMessage}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Active Conversation Feed */}
-          <div className="md:col-span-2 flex flex-col justify-between h-full bg-white">
-            <div className="p-4 border-b border-[#F1ECE1] flex items-center justify-between bg-[#F8F5EE]/30">
-              <div>
-                <h4 className="font-serif font-bold text-sm text-[#173F3A]">
-                  Direct Clinical Messaging
-                </h4>
-                <p className="text-[11px] text-[#66736F]">
-                  Encrypted • Non-emergency communications with your provider
-                </p>
-              </div>
-              <span className="inline-flex items-center gap-1 text-[11px] text-[#216761] font-semibold">
-                <Shield className="w-3.5 h-3.5" />
-                HIPAA Secure
-              </span>
-            </div>
-
-            {/* Messages body */}
-            <div className="p-4 space-y-3 overflow-y-auto max-h-[400px]">
-              {messages.map((m) => {
-                const isMine = m.senderId === currentUser?.id;
-                return (
-                  <div
-                    key={m.id}
-                    className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}
-                  >
-                    <div
-                      className={`max-w-md p-3.5 rounded-xl text-xs leading-relaxed ${
-                        isMine
-                          ? 'bg-[#216761] text-white rounded-br-none'
-                          : 'bg-[#F8F5EE] text-[#173F3A] rounded-bl-none border border-[#A9C2B2]/30'
-                      }`}
-                    >
-                      <span className="block text-[10px] opacity-75 font-semibold mb-1">
-                        {m.senderName} ({m.senderRole.replace('_', ' ')})
-                      </span>
-                      <p>{m.content}</p>
-                      {m.attachmentName && (
-                        <div className="mt-2 pt-2 border-t border-white/20 text-[10px] flex items-center gap-1 font-mono">
-                          <Download className="w-3 h-3" />
-                          <span>{m.attachmentName} ({m.attachmentSize})</span>
-                        </div>
-                      )}
-                    </div>
-                    <span className="text-[10px] text-[#66736F] mt-1 font-mono">
-                      {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Input Form */}
-            <form onSubmit={handleSendMessage} className="p-4 border-t border-[#F1ECE1] flex items-center gap-2">
-              <input
-                type="text"
-                value={newMessageText}
-                onChange={(e) => setNewMessageText(e.target.value)}
-                placeholder="Type your secure message..."
-                className="flex-1 px-3 py-2 text-xs bg-[#F8F5EE]/60 rounded-lg border border-[#A9C2B2]/50 focus:outline-none focus:ring-2 focus:ring-[#216761]"
-              />
-              <button
-                type="submit"
-                className="px-4 py-2 bg-[#216761] text-white text-xs font-bold rounded-lg hover:bg-[#173F3A] flex items-center gap-1.5"
-              >
-                <Send className="w-3.5 h-3.5" />
-                Send
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Tab 6: DOCUMENTS */}
-      {activeTab === 'documents' && (
-        <div className="bg-white rounded-2xl border border-[#A9C2B2]/40 p-6 sm:p-8 shadow-xs space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#F1ECE1] pb-4">
-            <div>
-              <h3 className="font-serif font-bold text-xl text-[#173F3A]">
-                Client Documents & Medical Releases
-              </h3>
-              <p className="text-xs text-[#66736F] mt-0.5">
-                Secure electronic records, signed consents, and uploaded insurance cards.
-              </p>
-            </div>
-            <button
-              onClick={() => setShowUploadModal(true)}
-              className="px-4 py-2 bg-[#216761] text-white text-xs font-bold rounded-lg hover:bg-[#173F3A] flex items-center gap-1.5"
-            >
-              <UploadCloud className="w-4 h-4 text-[#C6A66B]" />
-              Upload Document
-            </button>
-          </div>
-
-          <div className="divide-y divide-[#F1ECE1]">
-            {documents.map((doc) => (
-              <div key={doc.id} className="py-3.5 flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-[#216761]/10 text-[#216761] flex items-center justify-center">
-                    <FileText className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h4 className="font-serif font-bold text-sm text-[#173F3A]">
-                      {doc.title}
-                    </h4>
-                    <span className="text-xs text-[#66736F]">
-                      {doc.fileName} • {doc.fileSize} • Uploaded {doc.uploadedAt.split('T')[0]} by {doc.uploaderName}
-                    </span>
-                  </div>
-                </div>
-
-                <a
-                  href={`#download-${doc.id}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    window.alert(`Downloading securely: ${doc.fileName}`);
-                  }}
-                  className="px-3 py-1.5 rounded-lg border border-[#A9C2B2]/60 text-xs font-semibold text-[#173F3A] hover:bg-[#F8F5EE] flex items-center gap-1.5"
-                >
-                  <Download className="w-3.5 h-3.5 text-[#216761]" />
-                  Download
-                </a>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Tab 7: CARE PLAN */}
+      {/* Tab: CARE PLAN */}
       {activeTab === 'care_plan' && (
-        <div className="bg-white rounded-2xl border border-[#A9C2B2]/40 p-6 sm:p-8 shadow-xs space-y-6">
-          <div className="border-b border-[#F1ECE1] pb-4">
-            <span className="text-xs font-bold uppercase tracking-widest text-[#216761]">
-              Clinical Pathway
-            </span>
-            <h3 className="font-serif font-bold text-xl text-[#173F3A] mt-1">
-              Individualized Care Plan & Goals
-            </h3>
-            <p className="text-xs text-[#66736F] mt-0.5">
-              Target Problem: <strong>{activeCarePlan?.targetProblem || activeCarePlan?.diagnosisOrFocus || 'Depressive Symptoms & Behavioral Agitation'}</strong> • Last Updated: {activeCarePlan?.updatedAt ? activeCarePlan.updatedAt.split('T')[0] : 'Current'}
-            </p>
-          </div>
-
-          <div className="space-y-6">
-            {activeCarePlan?.goals && Array.isArray(activeCarePlan.goals) && activeCarePlan.goals.length > 0 ? (
-              activeCarePlan.goals.map((goal, idx) => (
-                <div key={goal?.id || idx} className="p-5 rounded-xl border border-[#A9C2B2]/40 bg-[#F8F5EE]/40 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-serif font-bold text-base text-[#173F3A]">
-                      Goal {idx + 1}: {goal?.title || 'Clinical Objective'}
-                    </h4>
-                    <span className="text-xs font-semibold px-2.5 py-0.5 rounded bg-[#216761]/15 text-[#173F3A] capitalize">
-                      {goal?.status?.replace('_', ' ') || 'in progress'}
-                    </span>
-                  </div>
-
-                  <p className="text-xs text-[#66736F] leading-relaxed">
-                    {goal?.description || ''}
-                  </p>
-
-                  {goal?.milestones && Array.isArray(goal.milestones) && goal.milestones.length > 0 && (
-                    <div className="pt-2">
-                      <span className="text-[11px] font-bold text-[#173F3A] block mb-2">Milestones:</span>
-                      <div className="space-y-2">
-                        {goal.milestones.map((m, mIdx) => (
-                          <div key={mIdx} className="flex items-center gap-2 text-xs text-[#202826]">
-                            {m?.completed ? (
-                              <CheckCircle2 className="w-4 h-4 text-[#216761] shrink-0" />
-                            ) : (
-                              <span className="w-4 h-4 rounded-full border border-gray-400 shrink-0" />
-                            )}
-                            <span className={m?.completed ? 'line-through text-gray-500' : ''}>{m?.title || ''}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))
-            ) : activeCarePlan?.primaryGoals && Array.isArray(activeCarePlan.primaryGoals) && activeCarePlan.primaryGoals.length > 0 ? (
-              activeCarePlan.primaryGoals.map((goalStr, idx) => (
-                <div key={idx} className="p-5 rounded-xl border border-[#A9C2B2]/40 bg-[#F8F5EE]/40 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-serif font-bold text-base text-[#173F3A]">
-                      Goal {idx + 1}: Primary Clinical Objective
-                    </h4>
-                    <span className="text-xs font-semibold px-2.5 py-0.5 rounded bg-[#216761]/15 text-[#173F3A]">
-                      Active
-                    </span>
-                  </div>
-                  <p className="text-xs text-[#66736F] leading-relaxed">
-                    {goalStr}
-                  </p>
-                </div>
-              ))
-            ) : (
-              <div className="p-8 text-center bg-[#F8F5EE]/50 rounded-xl border border-dashed border-[#A9C2B2]/60">
-                <p className="text-sm text-[#66736F]">Your licensed clinician is currently formulating your individualized care plan goals.</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Tab: TELEHEALTH VIDEO SESSION */}
-      {activeTab === 'video_session' && (
-        <ClientVideoSessionView
-          providerName={nextAppointment?.providerName || 'Dr. Sarah Jenkins, LPC'}
-          serviceName={nextAppointment?.serviceName || 'Comprehensive Behavioral Health Consultation'}
-          onEndSession={() => setActiveTab('overview')}
+        <CarePlanView
+          carePlan={activeCarePlan}
+          onOpenBooking={onOpenBooking}
+          onRequestAmendment={() => setActiveTab('consents')}
         />
       )}
 
-      {/* Tab: FORMAL REPORTS */}
-      {activeTab === 'reports' && (
-        <ClientReportsView />
+      {/* Tab: APPOINTMENTS */}
+      {activeTab === 'appointments' && (
+        <AppointmentsView
+          appointments={appointments}
+          onRequestBooking={onOpenBooking}
+          onJoinTelehealth={(apt) => setActiveTab('video_session')}
+          onOpenConnectionTest={() => setShowConnectionModal(true)}
+          onCancelAppointment={handleCancelAppointment}
+          onRescheduleRequest={() => onOpenBooking()}
+        />
+      )}
+
+      {/* Tab: REQUIRED FORMS */}
+      {activeTab === 'forms' && (
+        <RequiredFormsView
+          intake={clientIntake}
+          onOpenWizard={() => setShowWizardModal(true)}
+        />
+      )}
+
+      {/* Tab: DOCUMENTS */}
+      {activeTab === 'documents' && (
+        <DocumentsView
+          documents={documents}
+          onUploadDocument={handleUploadDocument}
+          isUploading={isUploading}
+          uploadError={uploadError}
+        />
+      )}
+
+      {/* Tab: BILLING */}
+      {activeTab === 'billing' && (
+        <BillingView
+          invoices={clientInvoices}
+          onMakePayment={(invId) => {
+            // Re-fetch or mark paid locally
+            setClientInvoices((prev) =>
+              prev.map((i) => (i.id === invId ? { ...i, status: 'paid', paidAt: '2026-09-14' } : i))
+            );
+          }}
+        />
+      )}
+
+      {/* Tab: SECURE MESSAGES */}
+      {activeTab === 'messages' && (
+        <SecureMessagingView
+          conversations={conversations}
+          selectedConversationId={selectedConversationId}
+          onSelectConversation={setSelectedConversationId}
+          messages={messages}
+          onSendMessage={handleSendMessage}
+          currentUser={currentUser}
+          onOpenCrisisModal={() => setShowCrisisModal(true)}
+        />
       )}
 
       {/* Tab: WELLNESS PROGRAM */}
       {activeTab === 'wellness' && (
-        <WellnessProgramView programId="wp-vance-001" />
+        <WellnessProgramView />
       )}
 
-      {/* Tab: WEEKLY CHECK-INS */}
+      {/* Tab: PROGRESS CHECK-INS */}
       {activeTab === 'checkins' && (
         <ClientProgressCheckInsView />
       )}
 
-      {/* Tab: CONSENT CENTER */}
-      {activeTab === 'consents' && (
-        <ClientConsentsView />
+      {/* Tab: CLINICAL REPORTS */}
+      {activeTab === 'reports' && (
+        <ClientReportsView />
       )}
 
-      {/* Tab: BILLING & INVOICES */}
-      {activeTab === 'billing' && (
-        <div className="bg-white rounded-2xl border border-[#A9C2B2]/40 p-6 sm:p-8 shadow-xs space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#F1ECE1] pb-4">
-            <div>
-              <span className="text-xs font-bold uppercase tracking-widest text-[#216761]">
-                Financial Statement
-              </span>
-              <h3 className="font-serif font-bold text-xl text-[#173F3A] mt-1">
-                Client Statements, Invoices & Claims
-              </h3>
-              <p className="text-xs text-[#66736F] mt-0.5">
-                Itemized CPT coding, copay receipts, and Medicaid insurance billing details.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="px-3 py-1 bg-[#F8F5EE] border border-[#A9C2B2]/60 text-xs font-semibold rounded-lg text-[#173F3A]">
-                Primary Payer: SC Medicaid Healthy Connections
-              </span>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            {clientInvoices.length === 0 ? (
-              <p className="text-xs text-[#66736F] text-center py-6">No invoices currently posted to your account.</p>
-            ) : (
-              clientInvoices.map((inv) => (
-                <div
-                  key={inv.id}
-                  className="p-5 rounded-xl border border-[#A9C2B2]/40 bg-[#F8F5EE]/30 space-y-4"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#F1ECE1] pb-3">
-                    <div>
-                      <span className="text-xs font-bold text-[#173F3A] block">{inv.invoiceNumber || inv.id}</span>
-                      <span className="text-[11px] text-[#66736F]">Date of Service: {inv.serviceDate || inv.sessionDate || '2026-03-20'}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full capitalize ${
-                        inv.status === 'paid' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                      }`}>
-                        {inv.status?.replace('_', ' ') || 'pending'}
-                      </span>
-                      <span className="text-sm font-bold text-[#173F3A]">
-                        Total: ${(inv.totalBilled || inv.feeAmount || 150).toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead>
-                        <tr className="border-b border-[#A9C2B2]/30 text-[#66736F]">
-                          <th className="py-1 font-semibold">CPT Code</th>
-                          <th className="py-1 font-semibold">Service Description</th>
-                          <th className="py-1 font-semibold text-right">Fee</th>
-                          <th className="py-1 font-semibold text-right">Client Copay</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {inv.billingCodes && inv.billingCodes.length > 0 ? (
-                          inv.billingCodes.map((bc, idx) => (
-                            <tr key={idx}>
-                              <td className="py-2 font-mono text-[#216761]">{bc.code}</td>
-                              <td className="py-2 text-[#173F3A]">{bc.description}</td>
-                              <td className="py-2 text-right">${bc.standardFee.toFixed(2)}</td>
-                              <td className="py-2 text-right font-semibold text-[#173F3A]">
-                                ${inv.status === 'paid' ? '0.00' : (inv.clientCopayDue ?? 20).toFixed(2)}
-                              </td>
-                            </tr>
-                          ))
-                        ) : (
-                          <tr>
-                            <td className="py-2 font-mono text-[#216761]">90837</td>
-                            <td className="py-2 text-[#173F3A]">{inv.serviceName || 'Behavioral Health Session'}</td>
-                            <td className="py-2 text-right">${(inv.feeAmount || 150).toFixed(2)}</td>
-                            <td className="py-2 text-right font-semibold text-[#173F3A]">
-                              ${inv.status === 'paid' ? '0.00' : (inv.clientCopayDue ?? 20).toFixed(2)}
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-between text-xs text-[#66736F] pt-2 border-t border-[#F1ECE1]">
-                    <span>Reference / Claim ID: <code className="font-mono text-[11px]">{inv.invoiceReference || inv.paymentReceiptNumber || 'CLM-SC-2026-0042'}</code></span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => alert(`Receipt #${inv.invoiceNumber || inv.id} downloaded securely. Zero card numbers or CVVs stored.`)}
-                        className="px-3 py-1.5 rounded-lg border border-[#A9C2B2]/60 text-xs font-semibold text-[#173F3A] hover:bg-[#F8F5EE] flex items-center gap-1.5"
-                      >
-                        <Receipt className="w-3.5 h-3.5 text-[#216761]" />
-                        Download Superbill Receipt
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
+      {/* Tab: CONSENT & PRIVACY */}
+      {activeTab === 'consents' && (
+        <ClientConsentsView />
       )}
 
       {/* Tab: HIPAA PRIVACY REQUESTS */}
@@ -1074,223 +385,77 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({ onOpenBooking 
         <ClientPrivacyRequestsView />
       )}
 
-      {/* Tab: CRISIS & EMERGENCY HELP */}
+      {/* Tab: 24/7 CRISIS RESOURCES */}
       {activeTab === 'emergency_help' && (
         <ClientEmergencyHelpView />
       )}
 
-      {/* Cancel Appointment Modal */}
-      {cancelModalApt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#173F3A]/60 backdrop-blur-sm">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4">
-            <h3 className="font-serif font-bold text-lg text-[#173F3A]">
-              Cancel or Request Reschedule
-            </h3>
-            <p className="text-xs text-[#66736F]">
-              Are you sure you wish to cancel your session on <strong>{cancelModalApt.date} at {cancelModalApt.timeSlot}</strong>?
-            </p>
-            <div>
-              <label className="block text-xs font-semibold text-[#173F3A] mb-1">
-                Reason for Cancellation (Optional)
-              </label>
-              <textarea
-                rows={2}
-                value={cancelReason}
-                onChange={(e) => setCancelReason(e.target.value)}
-                placeholder="Schedule conflict, illness, etc."
-                className="w-full px-3 py-2 text-xs bg-[#F8F5EE] rounded-lg border border-[#A9C2B2]/60 focus:outline-none"
-              />
-            </div>
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setCancelModalApt(null)}
-                className="px-4 py-2 text-xs font-medium text-[#66736F]"
-              >
-                Keep Appointment
-              </button>
-              <button
-                type="button"
-                onClick={handleCancelAppointment}
-                className="px-4 py-2 rounded-lg bg-rose-700 text-white text-xs font-bold hover:bg-rose-800"
-              >
-                Confirm Cancellation
-              </button>
-            </div>
-          </div>
+      {/* Tab: TELEHEALTH ROOM */}
+      {activeTab === 'video_session' && (
+        <ClientVideoSessionView />
+      )}
+
+      {/* Tab: CLIENT SUPPORT & TICKETING */}
+      {activeTab === 'support' && (
+        <SupportView
+          onOpenCrisisModal={() => setShowCrisisModal(true)}
+          onOpenAccessibility={() => setActiveTab('accessibility')}
+        />
+      )}
+
+      {/* Tab: ACCOUNT & SECURITY */}
+      {activeTab === 'account' && (
+        <AccountView
+          currentUser={currentUser}
+          onSignOut={() => {
+            logout();
+            if (onNavigateHome) onNavigateHome();
+          }}
+        />
+      )}
+
+      {/* Tab: ACCESSIBILITY PREFERENCES */}
+      {activeTab === 'accessibility' && (
+        <AccessibilitySettingsView onBackToOverview={() => setActiveTab('overview')} />
+      )}
+
+      {/* Tab: ONBOARDING WIZARD */}
+      {activeTab === 'onboarding' && (
+        <div className="bg-white rounded-2xl border border-[#D9E1DC] p-6 shadow-xs">
+          <ClientOnboardingWizard
+            onCancel={() => setActiveTab('overview')}
+            onComplete={() => {
+              loadData();
+              setActiveTab('overview');
+            }}
+          />
         </div>
       )}
 
-      {/* New Service Request Modal */}
-      {showNewRequestModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#173F3A]/60 backdrop-blur-sm">
-          <div className="bg-white rounded-xl max-w-lg w-full p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-[#F1ECE1] pb-2">
-              <h3 className="font-serif font-bold text-lg text-[#173F3A]">
-                Submit a Special Service Request
-              </h3>
-              <button onClick={() => setShowNewRequestModal(false)}>
-                <X className="w-5 h-5 text-gray-500" />
-              </button>
-            </div>
-            <form onSubmit={handleCreateServiceRequest} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-[#173F3A] mb-1">
-                  Service Request Type
-                </label>
-                <select
-                  value={requestType}
-                  onChange={(e) => setRequestType(e.target.value)}
-                  className="w-full px-3 py-2 text-xs bg-white rounded-lg border border-[#A9C2B2]/60"
-                >
-                  <option value="In-Home Behavioral Consultation">In-Home Behavioral Consultation</option>
-                  <option value="School Behavioral Liaison Support">School Behavioral Liaison Support</option>
-                  <option value="Transportation / Logistics Assistance">Transportation / Logistics Assistance</option>
-                  <option value="Crisis Stabilization Check-in">Crisis Stabilization Check-in</option>
-                  <option value="Specialized EMDR Trauma Evaluation">Specialized EMDR Trauma Evaluation</option>
-                </select>
-              </div>
+      {/* Global Portal Modals */}
+      <CrisisSupportModal
+        isOpen={showCrisisModal}
+        onClose={() => setShowCrisisModal(false)}
+      />
 
-              <div>
-                <label className="block text-xs font-semibold text-[#173F3A] mb-1">
-                  Urgency Level
-                </label>
-                <select
-                  value={requestUrgency}
-                  onChange={(e) => setRequestUrgency(e.target.value as any)}
-                  className="w-full px-3 py-2 text-xs bg-white rounded-lg border border-[#A9C2B2]/60"
-                >
-                  <option value="routine">Routine (Standard Scheduling)</option>
-                  <option value="urgent_non_emergency">Urgent Non-Emergency (1-2 business days)</option>
-                  <option value="flexible">Flexible</option>
-                </select>
-              </div>
+      <TelehealthConnectionModal
+        isOpen={showConnectionModal}
+        onClose={() => setShowConnectionModal(false)}
+      />
 
-              <div>
-                <label className="block text-xs font-semibold text-[#173F3A] mb-1">
-                  Details & Description *
-                </label>
-                <textarea
-                  required
-                  rows={4}
-                  value={requestDescription}
-                  onChange={(e) => setRequestDescription(e.target.value)}
-                  placeholder="Describe the context, specific needs, or timeframe..."
-                  className="w-full px-3 py-2 text-xs bg-white rounded-lg border border-[#A9C2B2]/60"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowNewRequestModal(false)}
-                  className="px-4 py-2 text-xs text-[#66736F]"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-lg bg-[#216761] text-white text-xs font-bold hover:bg-[#173F3A]"
-                >
-                  Submit Request
-                </button>
-              </div>
-            </form>
+      {showWizardModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#17312E]/70 backdrop-blur-xs overflow-y-auto">
+          <div className="w-full max-w-4xl bg-white rounded-2xl p-6 shadow-2xl my-8">
+            <ClientOnboardingWizard
+              onCancel={() => setShowWizardModal(false)}
+              onComplete={() => {
+                setShowWizardModal(false);
+                loadData();
+              }}
+            />
           </div>
         </div>
       )}
-
-      {/* Upload Document Modal */}
-      {showUploadModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#173F3A]/60 backdrop-blur-sm">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-[#F1ECE1] pb-2">
-              <h3 className="font-serif font-bold text-lg text-[#173F3A]">
-                Upload Client Record
-              </h3>
-              <button onClick={() => setShowUploadModal(false)}>
-                <X className="w-5 h-5 text-gray-500" />
-              </button>
-            </div>
-            {uploadError && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
-                <span className="font-bold">Upload Rejected: </span>
-                {uploadError}
-              </div>
-            )}
-            <form onSubmit={handleUploadDocument} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-[#173F3A] mb-1">
-                  Document Title *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={uploadTitle}
-                  onChange={(e) => setUploadTitle(e.target.value)}
-                  placeholder="e.g. SC Medicaid Card Copy"
-                  className="w-full px-3 py-2 text-xs bg-white rounded-lg border border-[#A9C2B2]/60"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-[#173F3A] mb-1">
-                  Category
-                </label>
-                <select
-                  value={uploadCategory}
-                  onChange={(e) => setUploadCategory(e.target.value as any)}
-                  className="w-full px-3 py-2 text-xs bg-white rounded-lg border border-[#A9C2B2]/60"
-                >
-                  <option value="insurance_card">Insurance Card / Medicaid Verification</option>
-                  <option value="medical_record">External Medical / Psychiatric History</option>
-                  <option value="court_document">Court / DSS Legal Documentation</option>
-                  <option value="other">Other Supportive Record</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-[#173F3A] mb-1">
-                  Select File (PDF, PNG, JPG, DOCX — Max 10MB)
-                </label>
-                <input
-                  type="file"
-                  accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.txt"
-                  onChange={(e) => {
-                    setUploadError(null);
-                    if (e.target.files && e.target.files[0]) {
-                      setUploadFile(e.target.files[0]);
-                      if (!uploadTitle) setUploadTitle(e.target.files[0].name.replace(/\.[^/.]+$/, ''));
-                    }
-                  }}
-                  className="w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-[#216761] file:text-white hover:file:bg-[#173F3A]"
-                />
-                <p className="text-[10px] text-[#66736F] mt-1">
-                  Automated MIME-type & malware scan enforced. Executables strictly rejected.
-                </p>
-              </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  disabled={isUploading}
-                  onClick={() => {
-                    setShowUploadModal(false);
-                    setUploadError(null);
-                  }}
-                  className="px-4 py-2 text-xs text-[#66736F]"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isUploading}
-                  className="px-5 py-2 rounded-lg bg-[#216761] text-white text-xs font-bold hover:bg-[#173F3A] disabled:opacity-50"
-                >
-                  {isUploading ? 'Validating & Uploading...' : 'Upload File'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+    </ClientPortalLayout>
   );
 };

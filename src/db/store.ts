@@ -653,6 +653,12 @@ export class DatabaseStore {
     this.notify();
   }
 
+  public clearAllNotifications(userId: string): void {
+    this.notifications = this.notifications.filter((n) => n.userId !== userId);
+    setStored(STORAGE_KEYS.NOTIFICATIONS, this.notifications);
+    this.notify();
+  }
+
   // --- Audit Logs & Incidents ---
   public getAuditLogs(requestingUser: User): AuditLog[] {
     if (!['administrator', 'super_admin'].includes(requestingUser.role)) {

@@ -109,13 +109,15 @@ const MainAppContent: React.FC = () => {
         </div>
       )}
 
-      {/* Main Header & Navigation */}
-      <Navbar
-        currentView={currentView}
-        onNavigate={handleNavigate}
-        onOpenBooking={() => setIsBookingOpen(true)}
-        onOpenAuth={() => setIsAuthOpen(true)}
-      />
+      {/* Main Header & Navigation (Hidden in Portal Views to prevent leaking public marketing UI) */}
+      {currentView !== 'client_portal' && (
+        <Navbar
+          currentView={currentView}
+          onNavigate={handleNavigate}
+          onOpenBooking={() => setIsBookingOpen(true)}
+          onOpenAuth={() => setIsAuthOpen(true)}
+        />
+      )}
 
       {/* Primary Page Canvas */}
       <main className="flex-1">
@@ -192,7 +194,10 @@ const MainAppContent: React.FC = () => {
 
         {/* Portals */}
         {currentView === 'client_portal' && (
-          <ClientDashboard onOpenBooking={() => setIsBookingOpen(true)} />
+          <ClientDashboard
+            onOpenBooking={() => setIsBookingOpen(true)}
+            onNavigateHome={() => setCurrentView('home')}
+          />
         )}
 
         {currentView === 'staff_portal' && <StaffPortal />}
@@ -216,11 +221,13 @@ const MainAppContent: React.FC = () => {
         }}
       />
 
-      {/* Global Footer */}
-      <Footer
-        onNavigate={handleNavigate}
-        onOpenBooking={() => setIsBookingOpen(true)}
-      />
+      {/* Global Footer (Hidden in client portal to maintain dedicated secure app context) */}
+      {currentView !== 'client_portal' && (
+        <Footer
+          onNavigate={handleNavigate}
+          onOpenBooking={() => setIsBookingOpen(true)}
+        />
+      )}
     </div>
   );
 };
