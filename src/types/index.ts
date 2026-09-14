@@ -203,7 +203,7 @@ export interface ClientDocument {
   expiresAt?: string;
   storagePath?: string;
   downloadUrl?: string;
-  scanStatus?: 'passed' | 'pending' | 'quarantined';
+  scanStatus?: 'passed' | 'pending' | 'scanning' | 'quarantined' | 'unscanned';
   isQuarantined?: boolean;
 }
 

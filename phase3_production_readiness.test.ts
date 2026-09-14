@@ -14,6 +14,9 @@ import {
   canDeleteDocument,
   documentRegistry,
   MAX_FILE_SIZE_BYTES,
+  isMalwareScannerConfigured,
+  generateAuthorizedDownloadToken,
+  verifyAuthorizedDownloadToken,
 } from './server/uploadHardening';
 import {
   createBackupSnapshot,
@@ -203,6 +206,48 @@ describe('Phase 3 Production Readiness Verification Suite', () => {
       assert.ok(!uploadResult.success);
       assert.equal(uploadResult.statusCode, 403);
       assert.ok(uploadResult.error?.includes('Cross-client upload violation'));
+    });
+
+    test('Honest scanning status: rejects uploads with 503 if real scanner is not configured', async () => {
+      const pdfBuffer = Buffer.from('%PDF-1.7\nValid Patient Intake Form');
+      // When no real scanner environment variables are configured
+      const uploadResult = await processDocumentUpload({
+        buffer: pdfBuffer,
+        originalFilename: 'intake_consent.pdf',
+        uploaderId: 'client-01',
+        uploaderRole: 'client',
+        clientOwnerId: 'client-01',
+      });
+
+      assert.ok(!uploadResult.success);
+      assert.equal(uploadResult.statusCode, 503);
+      assert.equal(
+        uploadResult.error,
+        'Document security scanning is not configured. Uploads are temporarily unavailable.'
+      );
+    });
+
+    test('Short-lived authorized download tokens: generates, verifies, and rejects expired or forged tokens', () => {
+      const docId = 'doc_test_download_token_01';
+      const userId = 'client-01';
+
+      // Valid token (5 minute TTL)
+      const { token, expiresAt } = generateAuthorizedDownloadToken(docId, userId, 5 * 60 * 1000);
+      assert.ok(token);
+      assert.ok(expiresAt > Date.now());
+      assert.equal(verifyAuthorizedDownloadToken(docId, userId, token), true);
+
+      // Rejects forged token
+      const forgedToken = token.replace(/a/g, 'b');
+      assert.equal(verifyAuthorizedDownloadToken(docId, userId, forgedToken), false);
+
+      // Rejects mismatched docId or userId
+      assert.equal(verifyAuthorizedDownloadToken('doc_other_victim', userId, token), false);
+      assert.equal(verifyAuthorizedDownloadToken(docId, 'attacker_uid', token), false);
+
+      // Rejects expired token (-1000ms TTL)
+      const expired = generateAuthorizedDownloadToken(docId, userId, -1000);
+      assert.equal(verifyAuthorizedDownloadToken(docId, userId, expired.token), false);
     });
 
     test('Legal hold blocks document deletion', () => {

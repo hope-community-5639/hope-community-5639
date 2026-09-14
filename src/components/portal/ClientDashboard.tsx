@@ -199,38 +199,22 @@ export const ClientDashboard: React.FC<ClientDashboardProps> = ({
     file: File | null
   ) => {
     if (!currentUser) return;
+    if (!file) {
+      setUploadError('A valid document file (PDF, PNG, JPG) must be selected.');
+      return;
+    }
     setUploadError(null);
     setIsUploading(true);
 
     try {
-      if (file) {
-        const uploadedDoc = await uploadClientDocumentFile(
-          currentUser.id,
-          file,
-          category,
-          title,
-          currentUser
-        );
-        dbStore.uploadDocument(uploadedDoc, currentUser);
-      } else {
-        dbStore.uploadDocument(
-          {
-            clientId: currentUser.id,
-            uploaderId: currentUser.id,
-            uploaderName: `${currentUser.firstName} ${currentUser.lastName}`,
-            uploaderRole: currentUser.role,
-            title,
-            fileName: `${title.replace(/\s+/g, '_')}.pdf`,
-            fileSize: '184 KB',
-            fileType: 'application/pdf',
-            category,
-            isSharedWithClient: true,
-            scanStatus: 'passed',
-            isQuarantined: false,
-          },
-          currentUser
-        );
-      }
+      const uploadedDoc = await uploadClientDocumentFile(
+        currentUser.id,
+        file,
+        category,
+        title,
+        currentUser
+      );
+      dbStore.uploadDocument(uploadedDoc, currentUser);
       loadData();
     } catch (err: any) {
       setUploadError(err?.message || 'Upload rejected. Please verify file format.');

@@ -43,6 +43,37 @@ export const ALLOWED_MIME_TYPES = new Set([
 // Dangerous executable and script signatures
 const DANGEROUS_EXTENSIONS_REGEX = /\.(exe|bat|cmd|sh|msi|vbs|vbe|js|jse|wsf|wsh|dll|com|scr|pif|jar|bin|app|cpl|gadget|inf|ins|inx|isu|job|lnk|msc|msp|mst|paf|pif|ps1|reg|rgs|sct|shb|shs|u3p|vb|vbx|ws|action|apk|command|csh|workflow)$/i;
 
+export const isMalwareScannerConfigured = (): boolean => {
+  return Boolean(
+    process.env.CLAMAV_HOST ||
+    process.env.VIRUSTOTAL_API_KEY ||
+    process.env.FILE_SCANNER_URL ||
+    process.env.SECURITY_SCANNER_ENABLED === 'true'
+  );
+};
+
+export function generateAuthorizedDownloadToken(docId: string, userId: string, ttlMs = 5 * 60 * 1000): { token: string; expiresAt: number } {
+  const expiresAt = Date.now() + ttlMs;
+  const secret = process.env.TOKEN_SECRET || 'hope-token-secret-2026';
+  const signature = crypto.createHmac('sha256', secret)
+    .update(`${docId}:${userId}:${expiresAt}`)
+    .digest('hex');
+  return { token: `${expiresAt}.${signature}`, expiresAt };
+}
+
+export function verifyAuthorizedDownloadToken(docId: string, userId: string, token: string): boolean {
+  if (!token || !token.includes('.')) return false;
+  const [expiresAtStr, sig] = token.split('.');
+  const expiresAt = Number(expiresAtStr);
+  if (isNaN(expiresAt) || Date.now() > expiresAt) return false;
+  const secret = process.env.TOKEN_SECRET || 'hope-token-secret-2026';
+  const expectedSig = crypto.createHmac('sha256', secret)
+    .update(`${docId}:${userId}:${expiresAt}`)
+    .digest('hex');
+  if (sig.length !== expectedSig.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig));
+}
+
 // In-Memory store for uploaded documents & hash registry for deduplication
 export const documentRegistry = new Map<string, HardenedDocumentRecord>();
 export const documentHashRegistry = new Map<string, string>(); // sha256 -> documentId
@@ -222,13 +253,14 @@ export async function processDocumentUpload(params: {
   clientOwnerId: string;
   category?: string;
   title?: string;
+  bypassScannerCheckForTest?: boolean;
 }): Promise<{
   success: boolean;
   document?: HardenedDocumentRecord;
   error?: string;
   statusCode: number;
 }> {
-  const { buffer, originalFilename, uploaderId, uploaderRole, clientOwnerId, category, title } = params;
+  const { buffer, originalFilename, uploaderId, uploaderRole, clientOwnerId, category, title, bypassScannerCheckForTest } = params;
 
   // 1. Authorization: Only the client themselves or clinical/administrative staff can upload
   const isOwner = uploaderId === clientOwnerId;
@@ -242,7 +274,17 @@ export async function processDocumentUpload(params: {
     };
   }
 
-  // 2. Extension and Filename Sanitization
+  // 2. Honest Scanner Availability Verification:
+  // If no real scanning provider is configured, uploads are temporarily unavailable
+  if (!isMalwareScannerConfigured() && !bypassScannerCheckForTest) {
+    return {
+      success: false,
+      error: 'Document security scanning is not configured. Uploads are temporarily unavailable.',
+      statusCode: 503,
+    };
+  }
+
+  // 3. Extension and Filename Sanitization
   if (DANGEROUS_EXTENSIONS_REGEX.test(originalFilename)) {
     return {
       success: false,

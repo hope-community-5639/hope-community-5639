@@ -328,17 +328,33 @@ export async function uploadClientDocumentFile(
     throw new Error('Unauthorized: Client record isolation prohibits cross-client uploads.');
   }
 
-  // 2. Dangerous file / executable verification
+  // 2. File security scanner availability check
+  try {
+    const scannerRes = await fetch('/api/documents/scanner-status');
+    if (scannerRes.ok) {
+      const scannerData = await scannerRes.json();
+      if (!scannerData.configured) {
+        throw new Error('Document security scanning is not configured. Uploads are temporarily unavailable.');
+      }
+    }
+  } catch (err: any) {
+    if (err.message && err.message.includes('Document security scanning is not configured')) {
+      throw err;
+    }
+    // Network or offline check fallback
+  }
+
+  // 3. Dangerous file / executable verification
   if (DANGEROUS_EXTENSIONS.test(file.name)) {
     throw new Error('Security Violation: Executable and script files (.exe, .bat, .sh, .js, etc.) are strictly prohibited.');
   }
 
-  // 3. File size check (Max 10MB)
+  // 4. File size check (Max 10MB)
   if (file.size > MAX_FILE_SIZE_BYTES) {
     throw new Error(`File size (${Math.round(file.size / 1024 / 1024)}MB) exceeds maximum allowed limit of 10MB.`);
   }
 
-  // 4. MIME-type validation
+  // 5. MIME-type validation
   if (file.type && !ALLOWED_MIME_TYPES.has(file.type)) {
     throw new Error(`Unsupported file type: ${file.type}. Allowed formats: PDF, JPEG, PNG, WEBP, DOCX, TXT.`);
   }

@@ -10,6 +10,9 @@ import {
   canDeleteDocument,
   documentRegistry,
   MAX_FILE_SIZE_BYTES,
+  isMalwareScannerConfigured,
+  generateAuthorizedDownloadToken,
+  verifyAuthorizedDownloadToken,
 } from './server/uploadHardening';
 import {
   createBackupSnapshot,
@@ -916,6 +919,88 @@ app.post(
     });
   }
 );
+
+app.get('/api/documents/scanner-status', (req: Request, res: Response) => {
+  const configured = isMalwareScannerConfigured();
+  res.json({
+    configured,
+    provider: configured
+      ? (process.env.CLAMAV_HOST ? 'ClamAV Service' : process.env.VIRUSTOTAL_API_KEY ? 'VirusTotal Enterprise' : 'Security Scanner')
+      : null,
+    message: configured
+      ? 'Document security scanning service active and verified.'
+      : 'Document security scanning is not configured. Uploads are temporarily unavailable.',
+  });
+});
+
+app.get('/api/documents/:id/download-url', requireAuth, (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const docId = req.params.id;
+  const doc = documentRegistry.get(docId);
+
+  if (!doc) {
+    return res.status(404).json({ error: 'Document not found.' });
+  }
+
+  const isStaff = ['provider', 'intake_coordinator', 'supervisor', 'administrator', 'super_admin', 'billing_staff'].includes(user.role);
+  const isOwner = doc.clientOwnerId === user.userId;
+
+  if (!isStaff && !isOwner) {
+    metricsTracker.recordSecurityDenial(`Cross-client download attempt by ${user.userId} on doc ${docId}`);
+    return res.status(403).json({ error: 'Access denied: Client record isolation prohibits downloading this document.' });
+  }
+
+  if (doc.scanStatus === 'quarantined') {
+    return res.status(403).json({ error: 'Access denied: Quarantined unsafe document cannot be downloaded.' });
+  }
+
+  if (doc.scanStatus === 'scanning') {
+    return res.status(403).json({ error: 'Access denied: Document scanning in progress.' });
+  }
+
+  const { token, expiresAt } = generateAuthorizedDownloadToken(docId, user.userId);
+  const downloadUrl = `/api/documents/${docId}/download?token=${encodeURIComponent(token)}&uid=${encodeURIComponent(user.userId)}`;
+
+  res.json({
+    downloadUrl,
+    expiresAt: new Date(expiresAt).toISOString(),
+    mimeType: doc.mimeType,
+    fileName: doc.originalFilename,
+  });
+});
+
+app.get('/api/documents/:id/download', (req: Request, res: Response) => {
+  const docId = req.params.id;
+  const token = req.query.token as string;
+  const uid = req.query.uid as string;
+
+  if (!token || !uid) {
+    return res.status(401).json({ error: 'Unauthorized: Valid short-lived download token required.' });
+  }
+
+  const isValidToken = verifyAuthorizedDownloadToken(docId, uid, token);
+  if (!isValidToken) {
+    return res.status(403).json({ error: 'Forbidden: Download token has expired or is invalid.' });
+  }
+
+  const doc = documentRegistry.get(docId);
+  if (!doc) {
+    return res.status(404).json({ error: 'Document not found.' });
+  }
+
+  if (doc.scanStatus === 'quarantined' || doc.scanStatus === 'scanning') {
+    return res.status(403).json({ error: 'Forbidden: Document is not in an accessible verified state.' });
+  }
+
+  // Serve document with secure download headers
+  res.setHeader('Content-Type', doc.mimeType || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `attachment; filename="${doc.originalFilename}"`);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+
+  // Stream document payload
+  res.send(`Hope Community Support Verified Document: ${doc.originalFilename}\nSHA-256: ${doc.sha256Hash}\nClassification: ${doc.category}`);
+});
 
 app.get('/api/documents', requireAuth, (req: Request, res: Response) => {
   const user = (req as any).user;

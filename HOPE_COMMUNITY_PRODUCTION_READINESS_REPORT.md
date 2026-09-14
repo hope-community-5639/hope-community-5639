@@ -74,30 +74,34 @@
 
 ## 4. Hardened File Upload & Storage Architecture
 
-Client-side direct uploads have been replaced with a secure server-side pipeline (`/api/documents/upload` using `multer` memory storage and `/server/uploadHardening.ts`):
+Client-side direct uploads have been replaced with a secure server-side pipeline (`/api/documents/upload` using `multer` memory storage, `/server/uploadHardening.ts`, and `/api/documents/scanner-status`):
 
-1. **Magic-Byte Signature Verification:**
+1. **Honest File Security Posture & Removal of Simulated Verification:**
+   - The application strictly refuses to claim that a malware scan occurred if no real scanning provider is active.
+   - When no external malware-scanning provider (`CLAMAV_HOST`, `VIRUSTOTAL_API_KEY`, etc.) is configured, the Document Vault displays:
+     > *"Document security scanning is not configured. Uploads are temporarily unavailable."*
+   - Upload attempts without a configured scanner are rejected server-side with HTTP 503 Service Unavailable.
+   - Fake "Scan Verified" badges are strictly eliminated. Stored documents display their authentic status: `Stored (Unscanned)`, `Scanning (Pending)`, `Quarantined (Unsafe)`, or `Scan Verified (Clean)`.
+2. **Magic-Byte Signature Verification:**
    - **PDF:** Validates `%PDF-` (0x25 0x50 0x44 0x46 0x2D). Rejects disguised executables.
    - **PNG:** Validates `0x89 0x50 0x4E 0x47 0x0D 0x0A 0x1A 0x0A`. Inspects IHDR chunk dimensions.
    - **JPEG:** Validates `0xFF 0xD8 0xFF`.
    - **WEBP:** Validates `RIFF....WEBP` header chunk.
    - **DOCX:** Validates PK zip container (`0x50 0x4B 0x03 0x04`) and OpenXML schema indicators.
    - **TXT:** Validates pure UTF-8 without binary null bytes.
-2. **Prohibited Executable / Script Signatures:**
+3. **Prohibited Executable / Script Signatures:**
    - Windows PE/MZ headers (`0x4D 0x5A`) rejected immediately.
    - Linux ELF binaries (`0x7F 0x45 0x4C 0x46`) rejected immediately.
    - Java class / Mach-O (`0xCA 0xFE 0xBA 0xBE`) rejected immediately.
    - Shell scripts (`#!`) and web payloads (`<script`, `javascript:`, `<?php`) rejected immediately.
-3. **Image Decompression Bomb Defense:**
+4. **Image Decompression Bomb Defense:**
    - Rejects images whose declared pixel dimensions exceed 8,000 × 8,000 px or 40,000,000 total pixels to protect Cloud Run container memory.
-4. **Filename Normalization & Path Traversal:**
+5. **Filename Normalization & Path Traversal:**
    - Null bytes and directory traversal climbs (`../`, `..\`) stripped.
    - Filenames normalized to safe alphanumeric bases with sanitized extensions.
-5. **Deduplication & Storage:**
-   - SHA-256 cryptographic hash calculated for every buffer.
-   - Safe storage names generated via UUID + normalized base.
-6. **Audit & Metadata Record:**
-   - Every document logs: `uploaderId`, `uploaderRole`, `clientOwnerId`, `originalFilename`, `safeStorageName`, `mimeType`, `sizeBytes`, `sha256Hash`, `scanStatus`, `uploadTimestamp`, and `retentionStatus`.
+6. **Short-Lived Authorized Download URLs:**
+   - Users cannot download quarantined or unscanned/scanning files.
+   - Valid downloads require cryptographic HMAC-SHA256 time-limited tokens (`/api/documents/:id/download?token=...`) with 5-minute expirations.
 7. **Legal Hold Enforcement:**
    - Documents marked `retentionStatus: 'legal_hold'` are strictly protected against deletion.
 
@@ -105,12 +109,12 @@ Client-side direct uploads have been replaced with a secure server-side pipeline
 
 ## 5. Security & Test Results Summary
 
-### Test Suite Execution: **75 TESTS PASSING (0 FAILURES)**
+### Test Suite Execution: **77 TESTS PASSING (0 FAILURES)**
 
 ```text
-# Tests executed: 75 total across 3 test suites
+# Tests executed: 77 total across 3 test suites
 # Suites: 19
-# Pass: 75
+# Pass: 77
 # Fail: 0
 # Duration: ~2.8s
 ```
@@ -129,7 +133,7 @@ Client-side direct uploads have been replaced with a secure server-side pipeline
   - Appointment double-booking prevention.
   - Storage file size and extension enforcement.
   - Honest SMTP status classification.
-- **Phase 3 Production Readiness Tests (`phase3_production_readiness.test.ts`):** 27 / 27 PASSING
+- **Phase 3 Production Readiness Tests (`phase3_production_readiness.test.ts`):** 29 / 29 PASSING
   - Email header injection prevention, RFC 5322 regex, privacy masking: 3 tests passing.
   - Honest SMTP authentication failure reporting: 1 test passing.
   - Transactional templates completeness: 1 test passing.
@@ -138,6 +142,8 @@ Client-side direct uploads have been replaced with a secure server-side pipeline
   - Image decompression bomb protection: 1 test passing.
   - Path traversal and 10MB ceiling: 2 tests passing.
   - Cross-client upload authorization restriction: 1 test passing.
+  - Honest scanning status enforcement (503 without scanner): 1 test passing.
+  - Short-lived HMAC-signed authorized download tokens & expiration checks: 1 test passing.
   - Legal hold document deletion protection: 1 test passing.
   - Backup snapshot creation & SHA-256 integrity check: 1 test passing.
   - Controlled restoration verification & corrupted backup rejection: 2 tests passing.

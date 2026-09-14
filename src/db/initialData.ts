@@ -337,7 +337,7 @@ export const INITIAL_PROVIDERS: ProviderProfile[] = [
   },
   {
     id: 'prov_2',
-    userId: 'prov_placeholder_2',
+    userId: 'user_marcus_sterling',
     name: 'Marcus Sterling',
     credentials: 'MSW, LISW-CP',
     roleTitle: 'Senior Clinical Social Worker & Family Specialist',
@@ -353,7 +353,7 @@ export const INITIAL_PROVIDERS: ProviderProfile[] = [
   },
   {
     id: 'prov_3',
-    userId: 'prov_placeholder_3',
+    userId: 'user_elena_rostova',
     name: 'Elena Rostova',
     credentials: 'MA, LAC, CPSS',
     roleTitle: 'Behavioral Interventionist & Mentor Lead',
